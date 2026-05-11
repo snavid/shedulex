@@ -8,6 +8,7 @@ class Config:
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_size": 10}
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "jwt-secret-change-me")
     REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    INTERNAL_SERVICE_KEY = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
     API_TITLE = "Shedulex Timetable Engine"
     API_VERSION = "v1"
 

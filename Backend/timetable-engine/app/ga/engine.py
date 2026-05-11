@@ -112,8 +112,8 @@ def run_ga(
             else:
                 c1, c2 = single_point_crossover(p1, p2)
 
-            c1 = mutate(c1, mutation_rate, rooms, slots)
-            c2 = mutate(c2, mutation_rate, rooms, slots)
+            c1 = mutate(c1, mutation_rate, room_ids, slot_ids)
+            c2 = mutate(c2, mutation_rate, room_ids, slot_ids)
 
             c1.fitness = evaluate(c1, ctx)
             c2.fitness = evaluate(c2, ctx)

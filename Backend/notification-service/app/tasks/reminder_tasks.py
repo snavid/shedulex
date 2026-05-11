@@ -53,11 +53,15 @@ def schedule_daily_reminders():
     import httpx, os
 
     timetable_url = os.environ.get("TIMETABLE_SERVICE_URL", "http://timetable-engine:5002")
+    internal_key = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
     tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%A")
 
     try:
         with httpx.Client(timeout=10) as client:
-            resp = client.get(f"{timetable_url}/api/v1/timetable/entries?day={tomorrow}")
+            resp = client.get(
+                f"{timetable_url}/api/v1/timetable/entries?day={tomorrow}",
+                headers={"X-Internal-Service-Key": internal_key},
+            )
             if resp.status_code != 200:
                 return
             entries = resp.json().get("data", [])

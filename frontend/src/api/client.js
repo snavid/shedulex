@@ -64,16 +64,23 @@ export const timetableApi = {
 export const resourcesApi = {
   departments: () => api.get("/departments"),
   createDepartment: (data) => api.post("/departments", data),
+  updateDepartment: (id, data) => api.put(`/departments/${id}`, data),
+  deleteDepartment: (id) => api.delete(`/departments/${id}`),
   rooms: () => api.get("/rooms"),
   createRoom: (data) => api.post("/rooms", data),
   updateRoom: (id, data) => api.put(`/rooms/${id}`, data),
+  deleteRoom: (id) => api.delete(`/rooms/${id}`),
   lecturers: () => api.get("/lecturers"),
   createLecturer: (data) => api.post("/lecturers", data),
+  updateLecturer: (id, data) => api.put(`/lecturers/${id}`, data),
+  deleteLecturer: (id) => api.delete(`/lecturers/${id}`),
   courses: (params) => api.get("/courses", { params }),
   createCourse: (data) => api.post("/courses", data),
   updateCourse: (id, data) => api.put(`/courses/${id}`, data),
+  deleteCourse: (id) => api.delete(`/courses/${id}`),
   constraints: () => api.get("/constraints"),
   createConstraint: (data) => api.post("/constraints", data),
+  timeSlots: () => api.get("/time-slots"),
 }
 
 export const adjustmentApi = {
@@ -120,4 +127,10 @@ export const usersApi = {
   toggleActivation: (id) => api.patch(`/users/${id}/activate`),
   changeRole: (id, role_name) => api.patch(`/users/${id}/role`, { role_name }),
   roles: () => api.get("/users/roles/all"),
+}
+
+export const auditApi = {
+  list: (params) => api.get("/audit/logs", { params }),
+  userActivity: (userId) => api.get(`/audit/logs/user/${userId}`),
+  stats: () => api.get("/audit/logs/stats"),
 }

@@ -10,11 +10,15 @@ from flask_jwt_extended import jwt_required
 analytics_bp = Blueprint("analytics", __name__, url_prefix="/api/v1/analytics")
 
 TIMETABLE_URL = os.environ.get("TIMETABLE_SERVICE_URL", "http://timetable-engine:5002")
+INTERNAL_SERVICE_KEY = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
 
 
 def _get(path: str) -> dict:
     with httpx.Client(timeout=15) as client:
-        resp = client.get(f"{TIMETABLE_URL}{path}")
+        resp = client.get(
+            f"{TIMETABLE_URL}{path}",
+            headers={"X-Internal-Service-Key": INTERNAL_SERVICE_KEY},
+        )
         resp.raise_for_status()
         return resp.json()
 

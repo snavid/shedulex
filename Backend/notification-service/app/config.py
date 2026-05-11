@@ -19,6 +19,7 @@ class Config:
     BEEM_SECRET_KEY = os.environ.get("BEEM_SECRET_KEY", "")
     BEEM_SENDER_NAME = os.environ.get("BEEM_SENDER_NAME", "SHEDULEX")
     TIMETABLE_SERVICE_URL = os.environ.get("TIMETABLE_SERVICE_URL", "http://timetable-engine:5002")
+    INTERNAL_SERVICE_KEY = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
 
 
 class DevelopmentConfig(Config):

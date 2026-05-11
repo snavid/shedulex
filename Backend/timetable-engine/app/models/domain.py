@@ -148,6 +148,7 @@ class Timetable(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     entries = db.relationship("TimetableEntry", back_populates="timetable", cascade="all, delete-orphan")
+    snapshots = db.relationship("TimetableSnapshot", back_populates="timetable", cascade="all, delete-orphan")
     department = db.relationship("Department")
 
     def to_dict(self, include_entries=False):
@@ -192,6 +193,31 @@ class TimetableEntry(db.Model):
             "time_slot": self.time_slot.to_dict() if self.time_slot else None,
             "is_locked": self.is_locked,
             "notes": self.notes,
+        }
+
+
+class TimetableSnapshot(db.Model):
+    __tablename__ = "timetable_snapshots"
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    timetable_id = db.Column(db.String(36), db.ForeignKey("timetables.id"), nullable=False)
+    version = db.Column(db.Integer, nullable=False)
+    notes = db.Column(db.String(500))
+    created_by = db.Column(db.String(36))
+    snapshot_data = db.Column(db.JSON, nullable=False, default=list)
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    timetable = db.relationship("Timetable", back_populates="snapshots")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "timetable_id": self.timetable_id,
+            "version": self.version,
+            "notes": self.notes,
+            "created_by": self.created_by,
+            "entry_count": len(self.snapshot_data or []),
+            "created_at": self.created_at.isoformat(),
         }
 
 

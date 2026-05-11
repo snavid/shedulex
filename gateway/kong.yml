@@ -10,6 +10,7 @@ services:
       - name: auth-routes
         paths:
           - /api/v1/auth
+          - /api/v1/users
         strip_path: false
     plugins:
       - name: rate-limiting
@@ -23,6 +24,12 @@ services:
       - name: timetable-routes
         paths:
           - /api/v1/timetable
+          - /api/v1/departments
+          - /api/v1/rooms
+          - /api/v1/lecturers
+          - /api/v1/courses
+          - /api/v1/constraints
+          - /api/v1/time-slots
         strip_path: false
     plugins:
       - name: jwt

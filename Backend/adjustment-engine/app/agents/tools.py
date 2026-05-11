@@ -5,21 +5,25 @@ Each tool communicates with the timetable-engine service via HTTP.
 import os
 import httpx
 from langchain_core.tools import tool
-from flask import current_app
 
 TIMETABLE_URL = os.environ.get("TIMETABLE_SERVICE_URL", "http://timetable-engine:5002")
+INTERNAL_SERVICE_KEY = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
+
+
+def _headers() -> dict:
+    return {"X-Internal-Service-Key": INTERNAL_SERVICE_KEY}
 
 
 def _get(path: str) -> dict:
     with httpx.Client(timeout=15) as client:
-        resp = client.get(f"{TIMETABLE_URL}{path}")
+        resp = client.get(f"{TIMETABLE_URL}{path}", headers=_headers())
         resp.raise_for_status()
         return resp.json()
 
 
 def _post(path: str, payload: dict) -> dict:
     with httpx.Client(timeout=15) as client:
-        resp = client.post(f"{TIMETABLE_URL}{path}", json=payload)
+        resp = client.post(f"{TIMETABLE_URL}{path}", json=payload, headers=_headers())
         resp.raise_for_status()
         return resp.json()
 
@@ -72,7 +76,7 @@ def get_lecturer_free_slots(lecturer_id: str, timetable_id: str) -> str:
             for e in entries
             if e.get("lecturer", {}).get("id") == lecturer_id
         }
-        slots_data = _get("/api/v1/time-slots") if False else {"data": []}
+        slots_data = _get("/api/v1/time-slots")
         free = [s for s in slots_data.get("data", []) if s["id"] not in busy_slots]
         return str(free)
     except Exception as e:
