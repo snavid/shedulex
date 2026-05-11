@@ -20,5 +20,6 @@ def create_app(config_name=None):
         return jsonify({"status": "ok", "service": "document-service"}), 200
 
     with app.app_context():
+        from app import models  # noqa: F401 - ensure model metadata is registered
         db.create_all()
     return app

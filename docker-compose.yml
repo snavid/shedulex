@@ -229,6 +229,11 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${DOCUMENT_DB:-document_db}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       TIMETABLE_SERVICE_URL: http://timetable-engine:5002
+      DOCUMENT_PUBLIC_BASE_URL: ${DOCUMENT_PUBLIC_BASE_URL:-http://localhost:8000}
+      EXPORT_CACHE_TTL_SECONDS: ${EXPORT_CACHE_TTL_SECONDS:-300}
+      EXPORT_SHARE_TOKEN_MAX_HOURS: ${EXPORT_SHARE_TOKEN_MAX_HOURS:-168}
+      DOCUMENT_SHARE_SECRET: ${DOCUMENT_SHARE_SECRET:-}
+      DOCUMENT_SHARE_SALT: ${DOCUMENT_SHARE_SALT:-shedulex-document-share}
     ports:
       - "5006:5006"
     networks:

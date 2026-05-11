@@ -111,6 +111,16 @@ export const documentApi = {
   downloadPdf: (id) => `${BASE}/documents/timetable/${id}/pdf`,
   downloadExcel: (id) => `${BASE}/documents/timetable/${id}/excel`,
   downloadCsv: (id) => `${BASE}/documents/timetable/${id}/csv`,
+  downloadBundle: (id, formats = ["pdf", "excel", "csv"]) =>
+    `${BASE}/documents/timetable/${id}/bundle?formats=${encodeURIComponent(formats.join(","))}`,
+  preview: (id) => api.get(`/documents/timetable/${id}/preview`),
+  downloadPdfBlob: (id) => api.get(`/documents/timetable/${id}/pdf`, { responseType: "blob" }),
+  downloadExcelBlob: (id) => api.get(`/documents/timetable/${id}/excel`, { responseType: "blob" }),
+  downloadCsvBlob: (id) => api.get(`/documents/timetable/${id}/csv`, { responseType: "blob" }),
+  downloadBundleBlob: (id, formats = ["pdf", "excel", "csv"]) =>
+    api.get(`/documents/timetable/${id}/bundle`, { params: { formats: formats.join(",") }, responseType: "blob" }),
+  createShareLink: (data) => api.post("/documents/share-links", data),
+  analyticsOverview: (params) => api.get("/documents/analytics/overview", { params }),
 }
 
 export const analyticsApi = {
