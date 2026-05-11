@@ -1,0 +1,273 @@
+version: "3.9"
+
+# ─── Networks ─────────────────────────────────────────────────────────────────
+networks:
+  shedulex-net:
+    driver: bridge
+
+# ─── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  redis_data:
+  kong_data:
+
+# ─── Services ─────────────────────────────────────────────────────────────────
+services:
+
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: shedulex-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-shedulex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shedulex_secret}
+      POSTGRES_DB: shedulex_master
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_databases.sql:/docker-entrypoint-initdb.d/init_databases.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - shedulex-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shedulex}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: shedulex-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - shedulex-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Kong API Gateway ────────────────────────────────────────────────────────
+  kong:
+    image: kong:3.6-ubuntu
+    container_name: shedulex-kong
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+    volumes:
+      - ./gateway/kong.yml:/etc/kong/kong.yml:ro
+    ports:
+      - "8000:8000"   # proxy
+      - "8001:8001"   # admin API
+    networks:
+      - shedulex-net
+    depends_on:
+      - auth-service
+      - timetable-engine
+      - adjustment-engine
+      - notification-service
+      - calendar-service
+      - document-service
+      - analytics-service
+      - audit-service
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ── Microservices ────────────────────────────────────────────────────────────
+  auth-service:
+    build:
+      context: ./Backend/auth-service
+      dockerfile: Dockerfile
+    container_name: shedulex-auth
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${AUTH_DB:-auth_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    ports:
+      - "5001:5001"
+    networks:
+      - shedulex-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  timetable-engine:
+    build:
+      context: ./Backend/timetable-engine
+      dockerfile: Dockerfile
+    container_name: shedulex-timetable
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${TIMETABLE_DB:-timetable_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    ports:
+      - "5002:5002"
+    networks:
+      - shedulex-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  adjustment-engine:
+    build:
+      context: ./Backend/adjustment-engine
+      dockerfile: Dockerfile
+    container_name: shedulex-adjustment
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${ADJUSTMENT_DB:-adjustment_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      TIMETABLE_SERVICE_URL: http://timetable-engine:5002
+    ports:
+      - "5003:5003"
+    networks:
+      - shedulex-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  notification-service:
+    build:
+      context: ./Backend/notification-service
+      dockerfile: Dockerfile
+    container_name: shedulex-notification
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${NOTIFICATION_DB:-notification_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    ports:
+      - "5004:5004"
+    networks:
+      - shedulex-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  notification-worker:
+    build:
+      context: ./Backend/notification-service
+      dockerfile: Dockerfile
+    container_name: shedulex-notification-worker
+    command: celery -A celery_worker.celery worker --loglevel=info --concurrency=4
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${NOTIFICATION_DB:-notification_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    networks:
+      - shedulex-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  notification-beat:
+    build:
+      context: ./Backend/notification-service
+      dockerfile: Dockerfile
+    container_name: shedulex-notification-beat
+    command: celery -A celery_worker.celery beat --loglevel=info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${NOTIFICATION_DB:-notification_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    networks:
+      - shedulex-net
+    depends_on:
+      - notification-worker
+
+  calendar-service:
+    build:
+      context: ./Backend/calendar-service
+      dockerfile: Dockerfile
+    container_name: shedulex-calendar
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${CALENDAR_DB:-calendar_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    ports:
+      - "5005:5005"
+    networks:
+      - shedulex-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  document-service:
+    build:
+      context: ./Backend/document-service
+      dockerfile: Dockerfile
+    container_name: shedulex-document
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${DOCUMENT_DB:-document_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      TIMETABLE_SERVICE_URL: http://timetable-engine:5002
+    ports:
+      - "5006:5006"
+    networks:
+      - shedulex-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  analytics-service:
+    build:
+      context: ./Backend/analytics-service
+      dockerfile: Dockerfile
+    container_name: shedulex-analytics
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${ANALYTICS_DB:-analytics_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      TIMETABLE_SERVICE_URL: http://timetable-engine:5002
+    ports:
+      - "5007:5007"
+    networks:
+      - shedulex-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  audit-service:
+    build:
+      context: ./Backend/audit-service
+      dockerfile: Dockerfile
+    container_name: shedulex-audit
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${AUDIT_DB:-audit_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    ports:
+      - "5008:5008"
+    networks:
+      - shedulex-net
+    depends_on:
+      postgres:
+        condition: service_healthy

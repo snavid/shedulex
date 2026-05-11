@@ -1,0 +1,141 @@
+_format_version: "3.0"
+_transform: true
+
+# ─── Services ─────────────────────────────────────────────────────────────────
+services:
+
+  - name: auth-service
+    url: http://auth-service:5001
+    routes:
+      - name: auth-routes
+        paths:
+          - /api/v1/auth
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 60
+          policy: local
+
+  - name: timetable-service
+    url: http://timetable-engine:5002
+    routes:
+      - name: timetable-routes
+        paths:
+          - /api/v1/timetable
+        strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+      - name: rate-limiting
+        config:
+          minute: 120
+          policy: local
+
+  - name: adjustment-service
+    url: http://adjustment-engine:5003
+    routes:
+      - name: adjustment-routes
+        paths:
+          - /api/v1/adjustments
+        strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+      - name: rate-limiting
+        config:
+          minute: 60
+          policy: local
+
+  - name: notification-service
+    url: http://notification-service:5004
+    routes:
+      - name: notification-routes
+        paths:
+          - /api/v1/notifications
+        strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+      - name: rate-limiting
+        config:
+          minute: 30
+          policy: local
+
+  - name: calendar-service
+    url: http://calendar-service:5005
+    routes:
+      - name: calendar-routes
+        paths:
+          - /api/v1/calendar
+        strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+
+  - name: document-service
+    url: http://document-service:5006
+    routes:
+      - name: document-routes
+        paths:
+          - /api/v1/documents
+        strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+
+  - name: analytics-service
+    url: http://analytics-service:5007
+    routes:
+      - name: analytics-routes
+        paths:
+          - /api/v1/analytics
+        strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+
+  - name: audit-service
+    url: http://audit-service:5008
+    routes:
+      - name: audit-routes
+        paths:
+          - /api/v1/audit
+        strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+
+# ─── Global plugins ───────────────────────────────────────────────────────────
+plugins:
+  - name: cors
+    config:
+      origins:
+        - "http://localhost:5173"
+        - "http://localhost:8080"
+      methods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - Accept
+        - Authorization
+        - Content-Type
+        - X-Request-ID
+      credentials: true
+      max_age: 3600
+
+  - name: request-id
+    config:
+      header_name: X-Request-ID
+      generator: uuid

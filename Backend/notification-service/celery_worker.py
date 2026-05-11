@@ -1,0 +1,31 @@
+"""Celery worker entry point with beat schedule for periodic tasks."""
+import os
+from celery import Celery
+from celery.schedules import crontab
+
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
+celery = Celery(
+    "notification-service",
+    broker=REDIS_URL,
+    backend=REDIS_URL,
+    include=["app.tasks.reminder_tasks"],
+)
+
+celery.conf.update(
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+    timezone="Africa/Dar_es_Salaam",
+    enable_utc=True,
+    beat_schedule={
+        # Send daily reminders every evening at 19:00
+        "daily-reminders": {
+            "task": "tasks.schedule_daily_reminders",
+            "schedule": crontab(hour=19, minute=0),
+        },
+    },
+)
+
+if __name__ == "__main__":
+    celery.start()
