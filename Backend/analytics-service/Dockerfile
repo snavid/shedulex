@@ -5,4 +5,4 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 EXPOSE 5007
-CMD ["gunicorn", "--bind", "0.0.0.0:5007", "--workers", "2", "wsgi:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5007", "--workers", "1", "wsgi:app"]

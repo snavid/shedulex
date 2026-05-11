@@ -1,0 +1,19 @@
+# Avoid Windows "Access is denied" when Docker reads build context
+.pytest_cache
+__pycache__
+*.py[cod]
+*$py.class
+.venv
+venv
+.env
+.env.*
+!.env.example
+.git
+.mypy_cache
+.hypothesis
+htmlcov
+.coverage
+coverage.xml
+*.egg-info
+dist/
+build/

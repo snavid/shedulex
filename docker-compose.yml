@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ─── Networks ─────────────────────────────────────────────────────────────────
 networks:
   shedulex-net:
@@ -30,7 +28,8 @@ services:
     networks:
       - shedulex-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shedulex}"]
+      # pg_isready defaults DB name to the user; POSTGRES_DB is shedulex_master
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -58,6 +57,8 @@ services:
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      # All bundled Lua plugins (explicit list avoids "plugin X not enabled" on slim defaults)
+      KONG_PLUGINS: bundled
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
@@ -95,7 +96,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${AUTH_DB:-auth_db}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "5001:5001"
     networks:
@@ -119,7 +120,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${TIMETABLE_DB:-timetable_db}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "5002:5002"
     networks:
@@ -138,7 +139,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${ADJUSTMENT_DB:-adjustment_db}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: redis://redis:6379/0
       TIMETABLE_SERVICE_URL: http://timetable-engine:5002
     ports:
       - "5003:5003"
@@ -158,7 +159,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${NOTIFICATION_DB:-notification_db}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "5004:5004"
     networks:
@@ -178,7 +179,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${NOTIFICATION_DB:-notification_db}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: redis://redis:6379/0
     networks:
       - shedulex-net
     depends_on:
@@ -196,7 +197,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${NOTIFICATION_DB:-notification_db}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: redis://redis:6379/0
     networks:
       - shedulex-net
     depends_on:
@@ -210,7 +211,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${CALENDAR_DB:-calendar_db}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "5005:5005"
     networks:
@@ -227,7 +228,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${DOCUMENT_DB:-document_db}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: redis://redis:6379/0
       TIMETABLE_SERVICE_URL: http://timetable-engine:5002
       DOCUMENT_PUBLIC_BASE_URL: ${DOCUMENT_PUBLIC_BASE_URL:-http://localhost:8000}
       EXPORT_CACHE_TTL_SECONDS: ${EXPORT_CACHE_TTL_SECONDS:-300}
@@ -250,7 +251,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${ANALYTICS_DB:-analytics_db}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: redis://redis:6379/0
       TIMETABLE_SERVICE_URL: http://timetable-engine:5002
     ports:
       - "5007:5007"
@@ -268,7 +269,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${AUDIT_DB:-audit_db}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "5008:5008"
     networks:

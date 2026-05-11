@@ -11,4 +11,4 @@ COPY . .
 
 EXPOSE 5003
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5003", "--workers", "2", "--timeout", "180", "wsgi:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5003", "--workers", "1", "--timeout", "180", "wsgi:app"]

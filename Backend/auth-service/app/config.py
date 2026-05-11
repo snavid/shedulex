@@ -18,9 +18,10 @@ class Config:
     # Redis
     REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6490/0")
 
-    # Rate limiting
-    RATELIMIT_STORAGE_URL = os.environ.get("REDIS_URL", "redis://localhost:6490/0")
+    # Rate limiting (Flask-Limiter 3+ reads RATELIMIT_STORAGE_URI, not RATELIMIT_STORAGE_URL)
+    RATELIMIT_STORAGE_URI = os.environ.get("REDIS_URL", "redis://localhost:6490/0")
     RATELIMIT_DEFAULT = "200 per day;50 per hour"
+    RATELIMIT_ENABLED = True
 
     # Mail
     MAIL_SERVER = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
@@ -56,6 +57,7 @@ class TestingConfig(Config):
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(seconds=5)
     RATELIMIT_ENABLED = False
+    RATELIMIT_STORAGE_URI = "memory://"
 
 
 config = {

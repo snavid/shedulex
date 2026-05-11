@@ -18,6 +18,7 @@ celery.conf.update(
     result_serializer="json",
     timezone="Africa/Dar_es_Salaam",
     enable_utc=True,
+    broker_connection_retry_on_startup=True,
     beat_schedule={
         # Send daily reminders every evening at 19:00
         "daily-reminders": {
