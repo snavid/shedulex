@@ -69,6 +69,9 @@ services:
       KONG_DATABASE: "off"
       # Merged at startup: base routes + consumers fragment (JWT key/secret from configs)
       KONG_DECLARATIVE_CONFIG: /tmp/kong-merged.yml
+      # Refresh DNS faster when Docker recreates containers (avoids stale upstream IPs).
+      KONG_DNS_STALE_TTL: 1
+      KONG_DNS_ERROR_TTL: 1
       # All bundled Lua plugins (explicit list avoids "plugin X not enabled" on slim defaults)
       KONG_PLUGINS: bundled
       KONG_PROXY_ACCESS_LOG: /dev/stdout
@@ -95,6 +98,7 @@ services:
       - "8001:8001"   # admin API
     networks:
       - shedulex-net
+    restart: unless-stopped
     depends_on:
       - auth-service
       - timetable-engine
@@ -122,6 +126,7 @@ services:
       REDIS_URL: redis://redis:6379/0
     ports:
       - "5001:5001"
+    restart: unless-stopped
     networks:
       - shedulex-net
     depends_on:

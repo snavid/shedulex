@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DIGIT CLUB — Digital Skills Booklet</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Sora:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  @media print {
+    body { margin: 0; padding: 0; }
+    .page { page-break-after: always; }
+    .no-print { display: none; }
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Space Grotesk', sans-serif;
+    background: #f0ece4;
+    color: #1a1a2e;
+    line-height: 1.6;
+  }
+
+  .no-print {
+    background: #1a1a2e;
+    color: white;
+    text-align: center;
+    padding: 12px;
+    font-size: 14px;
+    font-family: 'Space Grotesk', sans-serif;
+  }
+  .no-print button {
+    background: #f5a623;
+    border: none;
+    color: #1a1a2e;
+    font-weight: 700;
+    padding: 8px 24px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-left: 16px;
+  }
+
+  .page {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 20px auto;
+    background: white;
+    padding: 0;
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.15);
+  }
+
+  /* ─── COVER PAGE ─── */
+  .cover {
+    background: #0d1b2a;
+    min-height: 297mm;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+  .cover-circles {
+    position: absolute; top: -60px; right: -60px;
+    width: 320px; height: 320px;
+    border-radius: 50%;
+    background: rgba(245,166,35,0.08);
+    border: 2px solid rgba(245,166,35,0.15);
+  }
+  .cover-circles::after {
+    content: '';
+    position: absolute; top: 40px; left: 40px; right: 40px; bottom: 40px;
+    border-radius: 50%;
+    border: 2px solid rgba(245,166,35,0.12);
+  }
+  .cover-dots {
+    position: absolute; bottom: 80px; left: 30px;
+    display: grid; grid-template-columns: repeat(8,1fr); gap: 10px;
+  }
+  .cover-dots span {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: rgba(255,255,255,0.12); display: block;
+  }
+  .cover-tag {
+    background: #f5a623;
+    color: #0d1b2a;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 6px 18px;
+    border-radius: 0 0 12px 0;
+    display: inline-block;
+    margin: 0;
+    align-self: flex-start;
+  }
+  .cover-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 40px 52px;
+  }
+  .cover-edition {
+    font-size: 12px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.45);
+    margin-bottom: 20px;
+  }
+  .cover-title {
+    font-family: 'Sora', sans-serif;
+    font-size: 52px;
+    font-weight: 800;
+    color: white;
+    line-height: 1.05;
+    margin-bottom: 6px;
+  }
+  .cover-title span { color: #f5a623; }
+  .cover-subtitle {
+    font-size: 16px;
+    color: rgba(255,255,255,0.55);
+    margin-bottom: 40px;
+    max-width: 280px;
+    line-height: 1.5;
+  }
+  .cover-topics {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .cover-topic {
+    display: flex; align-items: center; gap: 14px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 12px 16px;
+  }
+  .cover-topic-num {
+    background: #f5a623;
+    color: #0d1b2a;
+    font-size: 12px;
+    font-weight: 700;
+    width: 24px; height: 24px;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .cover-topic-name { font-size: 14px; font-weight: 500; color: white; }
+  .cover-footer {
+    padding: 24px 52px;
+    display: flex; justify-content: space-between; align-items: center;
+    border-top: 1px solid rgba(255,255,255,0.07);
+  }
+  .cover-footer-brand { font-size: 13px; color: rgba(255,255,255,0.35); }
+  .cover-footer-brand strong { color: #f5a623; }
+  .cover-badge {
+    background: rgba(245,166,35,0.15);
+    border: 1px solid rgba(245,166,35,0.3);
+    color: #f5a623;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    text-transform: uppercase;
+  }
+
+  /* ─── CONTENT PAGES ─── */
+  .content-page {
+    min-height: 297mm;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .page-header {
+    display: flex;
+    align-items: center;
+    padding: 18px 36px;
+    border-bottom: 2px solid #f0ece4;
+    gap: 14px;
+  }
+  .page-header-icon {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .page-header-text {}
+  .page-header-topic {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    opacity: 0.45;
+    margin-bottom: 2px;
+  }
+  .page-header-title {
+    font-family: 'Sora', sans-serif;
+    font-size: 20px;
+    font-weight: 800;
+    color: #1a1a2e;
+  }
+  .page-header-pg { margin-left: auto; font-size: 13px; opacity: 0.3; font-weight: 700; }
+  .page-body { padding: 28px 36px; flex: 1; }
+
+  /* ─── SECTION STYLES ─── */
+  .intro-box {
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  h2.section-title {
+    font-family: 'Sora', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    margin: 24px 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  h2.section-title::before {
+    content: '';
+    width: 4px; height: 18px;
+    border-radius: 3px;
+    display: inline-block;
+    background: currentColor;
+    opacity: 0.6;
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .card-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+  .card {
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .card-icon { font-size: 22px; margin-bottom: 6px; display: block; }
+  .card-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+  .card-desc { font-size: 12px; opacity: 0.75; line-height: 1.5; }
+
+  .warning-box {
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin: 16px 0;
+    font-size: 13px;
+    line-height: 1.6;
+    border-left: 4px solid;
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .warning-icon { font-size: 20px; flex-shrink: 0; margin-top: 2px; }
+
+  .tip-list { list-style: none; padding: 0; margin: 0; }
+  .tip-list li {
+    padding: 9px 14px 9px 38px;
+    position: relative;
+    font-size: 13px;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    line-height: 1.5;
+  }
+  .tip-list li::before {
+    content: attr(data-icon);
+    position: absolute; left: 12px; top: 10px;
+    font-size: 14px;
+  }
+
+  .quiz-box {
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin-top: 20px;
+  }
+  .quiz-title { font-size: 13px; font-weight: 700; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .quiz-q { font-size: 13px; margin-bottom: 8px; line-height: 1.5; }
+  .quiz-options { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .quiz-opt {
+    font-size: 12px;
+    padding: 7px 12px;
+    border-radius: 8px;
+    border: 1px dashed;
+    opacity: 0.7;
+  }
+
+  .scenario-box {
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 16px 0;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .scenario-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    opacity: 0.55;
+  }
+
+  .steps-list { counter-reset: steps; list-style: none; padding: 0; }
+  .steps-list li {
+    counter-increment: steps;
+    padding: 10px 14px 10px 46px;
+    position: relative;
+    font-size: 13px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    line-height: 1.5;
+  }
+  .steps-list li::before {
+    content: counter(steps);
+    position: absolute; left: 14px; top: 11px;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+
+  .big-stat {
+    text-align: center;
+    border-radius: 12px;
+    padding: 18px 12px;
+  }
+  .big-stat-num { font-family: 'Sora', sans-serif; font-size: 36px; font-weight: 800; }
+  .big-stat-label { font-size: 11px; opacity: 0.6; margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }
+
+  .discuss-box {
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-top: 20px;
+  }
+  .discuss-title { font-size: 12px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; opacity: 0.6; }
+  .discuss-q { font-size: 13px; padding: 7px 0; border-bottom: 1px dashed; }
+  .discuss-q:last-child { border-bottom: none; }
+
+  /* ─── COLOR THEMES ─── */
+  /* Topic 1: Internet — Teal */
+  .t1 .page-header-icon { background: #e0faf3; }
+  .t1 .page-header-title { color: #0a5940; }
+  .t1 h2.section-title { color: #0a8060; }
+  .t1 .intro-box { background: #e8fbf5; color: #0a5940; }
+  .t1 .card { background: #e8fbf5; color: #0a5940; }
+  .t1 .tip-list li { background: #f0fdf9; color: #0a5940; }
+  .t1 .steps-list li { background: #e8fbf5; }
+  .t1 .steps-list li::before { background: #0a8060; color: white; }
+  .t1 .warning-box { background: #fff9e6; border-color: #f5a623; color: #5a4000; }
+  .t1 .quiz-box { background: #0a8060; color: white; }
+  .t1 .quiz-opt { border-color: rgba(255,255,255,0.4); color: white; }
+  .t1 .discuss-box { background: #e8fbf5; color: #0a5940; }
+  .t1 .discuss-q { border-color: rgba(10,128,96,0.2); }
+
+  /* Topic 2: Cybersecurity — Deep Blue */
+  .t2 .page-header-icon { background: #e6eeff; }
+  .t2 .page-header-title { color: #1a2e6e; }
+  .t2 h2.section-title { color: #2244bb; }
+  .t2 .intro-box { background: #eef2ff; color: #1a2e6e; }
+  .t2 .card { background: #eef2ff; color: #1a2e6e; }
+  .t2 .tip-list li { background: #f3f6ff; color: #1a2e6e; }
+  .t2 .steps-list li { background: #eef2ff; }
+  .t2 .steps-list li::before { background: #2244bb; color: white; }
+  .t2 .warning-box { background: #fff2f2; border-color: #e03e3e; color: #5a0000; }
+  .t2 .quiz-box { background: #1a2e6e; color: white; }
+  .t2 .quiz-opt { border-color: rgba(255,255,255,0.35); color: white; }
+  .t2 .scenario-box { background: #eef2ff; color: #1a2e6e; }
+  .t2 .discuss-box { background: #eef2ff; color: #1a2e6e; }
+  .t2 .discuss-q { border-color: rgba(34,68,187,0.2); }
+
+  /* Topic 3: AI — Purple/Amber */
+  .t3 .page-header-icon { background: #f3eeff; }
+  .t3 .page-header-title { color: #3d1a80; }
+  .t3 h2.section-title { color: #6030bb; }
+  .t3 .intro-box { background: #f5f0ff; color: #3d1a80; }
+  .t3 .card { background: #f5f0ff; color: #3d1a80; }
+  .t3 .tip-list li { background: #f8f4ff; color: #3d1a80; }
+  .t3 .steps-list li { background: #f5f0ff; }
+  .t3 .steps-list li::before { background: #6030bb; color: white; }
+  .t3 .warning-box { background: #fff8e8; border-color: #f5a623; color: #5a3800; }
+  .t3 .quiz-box { background: #3d1a80; color: white; }
+  .t3 .quiz-opt { border-color: rgba(255,255,255,0.35); color: white; }
+  .t3 .scenario-box { background: #f5f0ff; color: #3d1a80; }
+  .t3 .discuss-box { background: #f5f0ff; color: #3d1a80; }
+  .t3 .discuss-q { border-color: rgba(96,48,187,0.2); }
+
+  /* Back cover */
+  .back-cover {
+    background: #0d1b2a;
+    min-height: 297mm;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    padding: 60px 40px;
+    position: relative;
+    overflow: hidden;
+  }
+  .back-grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(245,166,35,0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(245,166,35,0.06) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  .back-content { position: relative; z-index: 1; }
+  .back-logo {
+    font-family: 'Sora', sans-serif;
+    font-size: 48px; font-weight: 800;
+    color: white; margin-bottom: 4px;
+  }
+  .back-logo span { color: #f5a623; }
+  .back-tagline { font-size: 15px; color: rgba(255,255,255,0.4); margin-bottom: 40px; }
+  .back-rules {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    max-width: 420px; margin: 0 auto 40px;
+  }
+  .back-rule {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 16px 14px;
+    text-align: center;
+  }
+  .back-rule-icon { font-size: 26px; margin-bottom: 6px; display: block; }
+  .back-rule-text { font-size: 13px; color: rgba(255,255,255,0.6); line-height: 1.4; }
+  .back-pledge {
+    max-width: 380px; margin: 0 auto;
+    font-size: 14px; color: rgba(255,255,255,0.3);
+    line-height: 1.8; font-style: italic;
+  }
+  .back-pledge strong { color: #f5a623; font-style: normal; }
+</style>
+</head>
+<body>
+
+<div class="no-print">
+  📄 DIGIT Club — Digital Skills Booklet (Print-Ready A4)
+  <button onclick="window.print()">🖨️ Print / Save as PDF</button>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     COVER PAGE
+═══════════════════════════════════════════════ -->
+<div class="page">
+<div class="cover">
+  <div class="cover-circles"></div>
+  <div class="cover-dots">
+    <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+    <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+    <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+    <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+  </div>
+  <div class="cover-tag">DIGIT Club — Community Outreach 2025</div>
+  <div class="cover-content">
+    <div class="cover-edition">For O-Level Students · Form 1 to Form 5 · Tanzania</div>
+    <div class="cover-title">Digital<br>Skills for<br><span>Your Future</span></div>
+    <div class="cover-subtitle">Everything you need to know to stay safe, smart, and ready for the digital world.</div>
+    <div class="cover-topics">
+      <div class="cover-topic">
+        <div class="cover-topic-num">1</div>
+        <div class="cover-topic-name">🌐 &nbsp;Digital Literacy &amp; the Internet</div>
+      </div>
+      <div class="cover-topic">
+        <div class="cover-topic-num">2</div>
+        <div class="cover-topic-name">🔐 &nbsp;Cybersecurity Awareness</div>
+      </div>
+      <div class="cover-topic">
+        <div class="cover-topic-num">3</div>
+        <div class="cover-topic-name">🤖 &nbsp;Artificial Intelligence &amp; the Future</div>
+      </div>
+    </div>
+  </div>
+  <div class="cover-footer">
+    <div class="cover-footer-brand">Brought to you by <strong>DIGIT Club</strong> — IT &amp; BCS Students</div>
+    <div class="cover-badge">Free Copy — Keep It!</div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     PAGE 2: INTERNET & DIGITAL LITERACY — Part 1
+═══════════════════════════════════════════════ -->
+<div class="page">
+<div class="content-page t1">
+  <div class="page-header">
+    <div class="page-header-icon">🌐</div>
+    <div class="page-header-text">
+      <div class="page-header-topic">Topic 1 of 3</div>
+      <div class="page-header-title">Digital Literacy &amp; the Internet</div>
+    </div>
+    <div class="page-header-pg">02</div>
+  </div>
+  <div class="page-body">
+    <div class="intro-box">
+      <strong>Did you know?</strong> Tanzania has over 35 million internet users — that's almost 6 out of every 10 people. The internet is already part of your life. But knowing how to <em>use it well</em> is a skill you have to learn. Let's start!
+    </div>
+
+    <h2 class="section-title">What is digital literacy?</h2>
+    <p style="font-size:13px; line-height:1.7; margin-bottom:14px;">
+      Digital literacy means knowing how to find, use, share, and evaluate information using digital tools — computers, phones, the internet. It's not just knowing how to scroll social media. It's about being <strong>smart online</strong>.
+    </p>
+
+    <div class="card-grid">
+      <div class="card">
+        <span class="card-icon">🔍</span>
+        <div class="card-title">Search Effectively</div>
+        <div class="card-desc">Use specific keywords. Add quotes for exact phrases: <em>"climate change Tanzania"</em>. Use Google Scholar for school research.</div>
+      </div>
+      <div class="card">
+        <span class="card-icon">📧</span>
+        <div class="card-title">Email Basics</div>
+        <div class="card-desc">Write a clear subject. Use polite language for teachers or employers. Never share passwords via email.</div>
+      </div>
+      <div class="card">
+        <span class="card-icon">📚</span>
+        <div class="card-title">Online Learning</div>
+        <div class="card-desc">Khan Academy, Coursera, YouTube — all free. You can learn anything from coding to biology at no cost.</div>
+      </div>
+      <div class="card">
+        <span class="card-icon">🛠️</span>
+        <div class="card-title">Google Tools</div>
+        <div class="card-desc">Google Docs, Sheets, and Slides are free alternatives to Microsoft Office. Access them from any device.</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">How to spot FAKE NEWS 📰</h2>
+    <p style="font-size:13px; margin-bottom:12px; line-height:1.7;">Not everything you read online is true. Fake news spreads 6× faster than real news on social media! Use this checklist:</p>
+    <ul class="tip-list">
+      <li data-icon="🔎">Check the website name. Fake sites use names like "BBCnews24.net" (not bbc.com)</li>
+      <li data-icon="📅">Look at the date. Is the article old but being shared as "breaking news"?</li>
+      <li data-icon="📸">Check images on Google Images. Many viral images are taken from other events.</li>
+      <li data-icon="✅">Verify on two trusted sources: e.g. Mwananchi, The Citizen, or BBC Africa.</li>
+      <li data-icon="🤔">Ask: Does this make me feel VERY angry or afraid? Fake news is designed to make you emotional.</li>
+    </ul>
+
+    <div class="warning-box">
+      <div class="warning-icon">⚠️</div>
+      <div>
+        <strong>Screen addiction is real.</strong> If you pick up your phone within 5 minutes of waking up, check notifications constantly, or feel anxious without your phone — you may be developing a dependency. Set phone-free hours. Real life happens offline.
+      </div>
+    </div>
+
+    <div class="discuss-box">
+      <div class="discuss-title">💬 Let's Discuss</div>
+      <div class="discuss-q">1. Have you ever shared a news story that turned out to be fake? What happened?</div>
+      <div class="discuss-q">2. How many hours a day do you spend on social media? Is that too much?</div>
+      <div class="discuss-q">3. What is one thing you have learned online that you could NOT learn in school?</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     PAGE 3: INTERNET — Digital Citizenship
+═══════════════════════════════════════════════ -->
+<div class="page">
+<div class="content-page t1">
+  <div class="page-header">
+    <div class="page-header-icon">🌐</div>
+    <div class="page-header-text">
+      <div class="page-header-topic">Topic 1 continued</div>
+      <div class="page-header-title">Digital Citizenship — Being Responsible Online</div>
+    </div>
+    <div class="page-header-pg">03</div>
+  </div>
+  <div class="page-body">
+    <div class="intro-box">
+      <strong>Being a digital citizen</strong> means more than just using the internet. It means being a <em>responsible</em>, <em>respectful</em>, and <em>safe</em> member of the online world — just like being a good citizen of Tanzania.
+    </div>
+
+    <h2 class="section-title">The 3 Rules of Digital Citizenship</h2>
+    <div class="card-grid three">
+      <div class="card" style="text-align:center;">
+        <span class="card-icon">🤝</span>
+        <div class="card-title">Respectful</div>
+        <div class="card-desc">Treat people online like you would face-to-face. No bullying. No hate speech.</div>
+      </div>
+      <div class="card" style="text-align:center;">
+        <span class="card-icon">🛡️</span>
+        <div class="card-title">Responsible</div>
+        <div class="card-desc">Think before you post. Once it's online, it's there forever.</div>
+      </div>
+      <div class="card" style="text-align:center;">
+        <span class="card-icon">🔒</span>
+        <div class="card-title">Safe</div>
+        <div class="card-desc">Protect your personal info. Don't trust strangers online easily.</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">Social Media: Using it WISELY 📱</h2>
+    <ul class="tip-list">
+      <li data-icon="📵">Never share your home address, school, or daily routine publicly.</li>
+      <li data-icon="👥">Set your Instagram/TikTok to <em>private</em>. Only friends you know can follow you.</li>
+      <li data-icon="🤐">Do not post when you are angry. Wait 24 hours before responding to something that upsets you.</li>
+      <li data-icon="📷">Before sharing someone's photo or video, ask their permission first.</li>
+      <li data-icon="❌">Block and report accounts that harass you. It is NOT weakness — it is protecting yourself.</li>
+    </ul>
+
+    <h2 class="section-title">Free Tools Every Student Should Know</h2>
+    <ol class="steps-list">
+      <li><strong>Khan Academy</strong> (khanacademy.org) — Free lessons in Maths, Science, and more in multiple languages.</li>
+      <li><strong>Google Translate</strong> — Translate between Swahili and English instantly. Works offline too.</li>
+      <li><strong>Canva</strong> (canva.com) — Make beautiful presentations, posters, and flyers for free.</li>
+      <li><strong>WhatsApp Desktop</strong> — Use it to share documents and notes with classmates easily.</li>
+      <li><strong>YouTube</strong> — Search for any textbook topic + "explained" to find free tutorial videos.</li>
+    </ol>
+
+    <div class="quiz-box">
+      <div class="quiz-title">⚡ Quick Quiz — What do you know?</div>
+      <div class="quiz-q">You receive a WhatsApp message that says: "BREAKING: Government closing all schools tomorrow! Share to 10 friends!" What should you do?</div>
+      <div class="quiz-options">
+        <div class="quiz-opt">A. Share it immediately to all groups</div>
+        <div class="quiz-opt">B. Check on the official government website first</div>
+        <div class="quiz-opt">C. Ignore it and sleep</div>
+        <div class="quiz-opt">D. Call your teacher to confirm ✓</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     PAGE 4: CYBERSECURITY — Part 1
+═══════════════════════════════════════════════ -->
+<div class="page">
+<div class="content-page t2">
+  <div class="page-header">
+    <div class="page-header-icon">🔐</div>
+    <div class="page-header-text">
+      <div class="page-header-topic">Topic 2 of 3</div>
+      <div class="page-header-title">Cybersecurity — Stay Safe, Don't Get Hacked</div>
+    </div>
+    <div class="page-header-pg">04</div>
+  </div>
+  <div class="page-body">
+    <div class="intro-box">
+      <strong>Cybercrime costs Tanzania billions of shillings every year.</strong> Most victims are young people who didn't know what to look out for. The good news? A few simple habits can protect you from almost all attacks.
+    </div>
+
+    <h2 class="section-title">Password Safety 🔑</h2>
+    <div class="two-col">
+      <div>
+        <p style="font-size:12px; font-weight:700; color:#c0392b; margin-bottom:8px;">❌ WEAK PASSWORDS (Never use these)</p>
+        <ul class="tip-list">
+          <li data-icon="✗" style="background:#fff0f0; color:#7b0000;">123456</li>
+          <li data-icon="✗" style="background:#fff0f0; color:#7b0000;">Your name + birth year (e.g. Amina2008)</li>
+          <li data-icon="✗" style="background:#fff0f0; color:#7b0000;">password, abc123, qwerty</li>
+          <li data-icon="✗" style="background:#fff0f0; color:#7b0000;">Using the SAME password on all apps</li>
+        </ul>
+      </div>
+      <div>
+        <p style="font-size:12px; font-weight:700; color:#0a5940; margin-bottom:8px;">✅ STRONG PASSWORDS (Do this)</p>
+        <ul class="tip-list">
+          <li data-icon="✓" style="background:#f0fff8; color:#0a5940;">Mix UPPERCASE, lowercase, numbers, symbols</li>
+          <li data-icon="✓" style="background:#f0fff8; color:#0a5940;">Use a phrase: <em>Nap!ndaKiswahili2025</em></li>
+          <li data-icon="✓" style="background:#f0fff8; color:#0a5940;">Different password for each account</li>
+          <li data-icon="✓" style="background:#f0fff8; color:#0a5940;">Enable 2-Step Verification on WhatsApp &amp; Gmail</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2 class="section-title">What is Phishing? 🎣</h2>
+    <p style="font-size:13px; margin-bottom:12px; line-height:1.7;">Phishing is when a criminal pretends to be someone you trust (a bank, M-Pesa, your school, even a friend) to steal your information or money.</p>
+
+    <div class="scenario-box">
+      <div class="scenario-label">⚠️ Real Example — M-Pesa Scam</div>
+      <p style="font-size:13px; line-height:1.7;">You receive an SMS: <em>"Hongera! Umeshinda TZS 500,000 katika tuzo ya Vodacom! Tuma PIN yako ya M-Pesa kwa nambari hii ili tuweze kukutumia fedha. — Vodacom Kenya"</em></p>
+      <p style="font-size:13px; margin-top:8px; font-weight:700; color:#c0392b;">🚨 THIS IS A SCAM! Real companies NEVER ask for your PIN. Nobody gives away free money via SMS.</p>
+    </div>
+
+    <h2 class="section-title">How to Spot a Scam — The 5-Second Check</h2>
+    <ol class="steps-list">
+      <li>Did someone <strong>ask for money, a PIN, or a password</strong>? → Always a scam. Stop here.</li>
+      <li>Does the message create <strong>urgency</strong>? ("Act NOW! Expires in 10 minutes!") → Scammers rush you so you don't think.</li>
+      <li>Is the number or link <strong>unusual</strong>? (Like +254... instead of a local Tanzanian number?) → Big red flag.</li>
+      <li>Does the offer sound <strong>too good to be true</strong>? (Free phone, easy money, lottery win?) → It is.</li>
+      <li>Call the company <strong>directly</strong> using their official number on their website — never the number in the suspicious message.</li>
+    </ol>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     PAGE 5: CYBERSECURITY — Part 2
+═══════════════════════════════════════════════ -->
+<div class="page">
+<div class="content-page t2">
+  <div class="page-header">
+    <div class="page-header-icon">🔐</div>
+    <div class="page-header-text">
+      <div class="page-header-topic">Topic 2 continued</div>
+      <div class="page-header-title">WhatsApp Hacking, Fake Links &amp; Staying Safe</div>
+    </div>
+    <div class="page-header-pg">05</div>
+  </div>
+  <div class="page-body">
+    <h2 class="section-title">How WhatsApp Accounts Get Stolen 😱</h2>
+    <p style="font-size:13px; margin-bottom:12px; line-height:1.7;">WhatsApp hacking is one of the most common crimes among young people in Tanzania. Here's exactly how it happens — so you can prevent it:</p>
+    <ol class="steps-list">
+      <li>You receive an SMS with a 6-digit code from WhatsApp. A "friend" (who was already hacked) messages you asking for that code.</li>
+      <li>You share the code, thinking you are helping your friend.</li>
+      <li>The hacker uses that code to log into YOUR WhatsApp on their phone.</li>
+      <li>Now they use YOUR account to scam ALL your contacts, asking for money.</li>
+    </ol>
+    <div class="warning-box">
+      <div class="warning-icon">🔴</div>
+      <div><strong>GOLDEN RULE:</strong> NEVER share your WhatsApp verification code with ANYONE — not your best friend, not your parent, not even someone claiming to be WhatsApp support. That code is yours alone. Enable Two-Step Verification: WhatsApp → Settings → Account → Two-step verification.</div>
+    </div>
+
+    <h2 class="section-title">Fake Links &amp; Safe Downloading 🔗</h2>
+    <div class="card-grid">
+      <div class="card">
+        <span class="card-icon">🔗</span>
+        <div class="card-title">Check the URL carefully</div>
+        <div class="card-desc">Is it "whatsapp.com" or "whatsaap.com"? Scammers make tiny spelling changes you miss quickly.</div>
+      </div>
+      <div class="card">
+        <span class="card-icon">🔒</span>
+        <div class="card-title">Look for the padlock</div>
+        <div class="card-desc">A website starting with <strong>https://</strong> is more secure than one starting with <strong>http://</strong></div>
+      </div>
+      <div class="card">
+        <span class="card-icon">📲</span>
+        <div class="card-title">Download apps safely</div>
+        <div class="card-desc">Only use the official Google Play Store or Apple App Store. Avoid APK files from WhatsApp groups.</div>
+      </div>
+      <div class="card">
+        <span class="card-icon">🦠</span>
+        <div class="card-title">Viruses &amp; malware</div>
+        <div class="card-desc">Cracked/pirated apps often contain viruses. They can steal your data silently in the background.</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">Facebook &amp; Instagram Account Safety</h2>
+    <ul class="tip-list">
+      <li data-icon="🔐">Use a strong, unique password for each social media account.</li>
+      <li data-icon="📱">Turn on Login Alerts (Facebook → Settings → Security → Get alerts about unrecognized logins).</li>
+      <li data-icon="🙅">Reject friend/follow requests from people you do not know personally.</li>
+      <li data-icon="🔗">Never click links sent by strangers, even if the message looks tempting.</li>
+      <li data-icon="📋">Do not click "Login with Facebook" on random websites — it gives them access to your account.</li>
+    </ul>
+
+    <div class="quiz-box">
+      <div class="quiz-title">⚡ Quick Quiz</div>
+      <div class="quiz-q">You receive this WhatsApp message from your friend John: <em>"Rafiki, nahitaji sana msaada. Niambie code ya SMS niliyokutumia, ni ya kazi muhimu sana."</em> What do you do?</div>
+      <div class="quiz-options">
+        <div class="quiz-opt">A. Send him the code because he's your friend</div>
+        <div class="quiz-opt">B. NEVER share the code — call John directly ✓</div>
+        <div class="quiz-opt">C. Send half the code first</div>
+        <div class="quiz-opt">D. Delete the message and ignore John</div>
+      </div>
+    </div>
+
+    <div class="discuss-box">
+      <div class="discuss-title">💬 Let's Discuss</div>
+      <div class="discuss-q">1. Do you or your family use M-Pesa? Have you ever received a suspicious SMS about it?</div>
+      <div class="discuss-q">2. Do you know someone whose WhatsApp or Facebook was hacked? What happened?</div>
+      <div class="discuss-q">3. How can you help your parents or older relatives stay safe from phone scams?</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     PAGE 6: AI — What is AI?
+═══════════════════════════════════════════════ -->
+<div class="page">
+<div class="content-page t3">
+  <div class="page-header">
+    <div class="page-header-icon">🤖</div>
+    <div class="page-header-text">
+      <div class="page-header-topic">Topic 3 of 3</div>
+      <div class="page-header-title">Artificial Intelligence — The Future is Here</div>
+    </div>
+    <div class="page-header-pg">06</div>
+  </div>
+  <div class="page-body">
+    <div class="intro-box">
+      <strong>You are already using AI every day</strong> — when Spotify picks songs you like, when Google corrects your spelling, when TikTok shows you exactly the videos you want to keep watching. AI is not science fiction. It is your present.
+    </div>
+
+    <h2 class="section-title">So... What IS Artificial Intelligence?</h2>
+    <p style="font-size:13px; line-height:1.7; margin-bottom:14px;">
+      AI is when a computer is programmed to <strong>learn from data</strong> and <strong>make decisions</strong> — similar to how a human brain works, but much faster. Instead of being told exactly what to do for every situation, an AI <em>figures it out</em> from examples.
+    </p>
+    <div class="card-grid three">
+      <div class="card" style="text-align:center;">
+        <span class="card-icon">🧠</span>
+        <div class="card-title">Machine Learning</div>
+        <div class="card-desc">AI that learns patterns from millions of examples (like how spam filters work).</div>
+      </div>
+      <div class="card" style="text-align:center;">
+        <span class="card-icon">💬</span>
+        <div class="card-title">Chatbots (LLMs)</div>
+        <div class="card-desc">AI trained on text to have conversations. Example: ChatGPT by OpenAI.</div>
+      </div>
+      <div class="card" style="text-align:center;">
+        <span class="card-icon">🖼️</span>
+        <div class="card-title">Image AI</div>
+        <div class="card-desc">AI that creates, edits, or recognizes images. Used in phones for face unlock.</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">AI Tools You Can Use RIGHT NOW for School 🎒</h2>
+    <ol class="steps-list">
+      <li><strong>ChatGPT</strong> (chat.openai.com) — Ask it to explain difficult topics, summarize notes, or check your English writing. Free to use.</li>
+      <li><strong>Google Translate with AI</strong> — Now uses AI to translate whole sentences naturally, not word-by-word.</li>
+      <li><strong>Grammarly</strong> — AI tool that fixes your grammar and suggests better English sentences automatically.</li>
+      <li><strong>Photomath</strong> — Point your phone camera at a Maths problem and AI solves it step-by-step.</li>
+      <li><strong>Canva AI</strong> — Type a description and AI creates a poster or presentation slide for you.</li>
+    </ol>
+
+    <div class="warning-box">
+      <div class="warning-icon">⚠️</div>
+      <div>
+        <strong>AI is a tool, not a brain replacement!</strong> ChatGPT sometimes gives wrong answers confidently. Always verify important information from textbooks or teachers. Using AI to do all your homework is cheating — and it means YOU don't learn anything. Use AI to understand, not to copy.
+      </div>
+    </div>
+
+    <div class="scenario-box">
+      <div class="scenario-label">🌍 AI Changing Africa Right Now</div>
+      <p style="font-size:13px; line-height:1.7;">In Kenya, AI is being used to detect crop diseases from phone photos, helping farmers save their harvests. In Tanzania, AI-powered translation tools are helping preserve local languages like Sukuma and Haya. AI is not just a tool for rich countries — <strong>it can solve African problems too</strong>.</p>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     PAGE 7: AI — Ethics & Future
+═══════════════════════════════════════════════ -->
+<div class="page">
+<div class="content-page t3">
+  <div class="page-header">
+    <div class="page-header-icon">🤖</div>
+    <div class="page-header-text">
+      <div class="page-header-topic">Topic 3 continued</div>
+      <div class="page-header-title">AI Ethics, Dangers &amp; Your Future Career</div>
+    </div>
+    <div class="page-header-pg">07</div>
+  </div>
+  <div class="page-body">
+    <h2 class="section-title">The Good AND the Dangerous Side of AI ⚖️</h2>
+    <div class="two-col">
+      <div>
+        <p style="font-size:12px; font-weight:700; color:#0a5940; margin-bottom:8px;">✅ BENEFITS of AI</p>
+        <ul class="tip-list">
+          <li data-icon="✓" style="background:#f0fff8; color:#0a5940; font-size:12px;">Diagnoses diseases faster than doctors in some cases</li>
+          <li data-icon="✓" style="background:#f0fff8; color:#0a5940; font-size:12px;">Translates between languages instantly</li>
+          <li data-icon="✓" style="background:#f0fff8; color:#0a5940; font-size:12px;">Makes education accessible to remote areas</li>
+          <li data-icon="✓" style="background:#f0fff8; color:#0a5940; font-size:12px;">Automates boring, repetitive jobs</li>
+          <li data-icon="✓" style="background:#f0fff8; color:#0a5940; font-size:12px;">Helps scientists discover new medicines faster</li>
+        </ul>
+      </div>
+      <div>
+        <p style="font-size:12px; font-weight:700; color:#c0392b; margin-bottom:8px;">⚠️ DANGERS of AI</p>
+        <ul class="tip-list">
+          <li data-icon="✗" style="background:#fff0f0; color:#7b0000; font-size:12px;">Deepfakes — fake videos that look real, used to spread lies</li>
+          <li data-icon="✗" style="background:#fff0f0; color:#7b0000; font-size:12px;">AI can be biased against certain races or genders</li>
+          <li data-icon="✗" style="background:#fff0f0; color:#7b0000; font-size:12px;">Surveillance — governments can use AI to watch people</li>
+          <li data-icon="✗" style="background:#fff0f0; color:#7b0000; font-size:12px;">Job losses in repetitive industries (data entry, basic accounting)</li>
+          <li data-icon="✗" style="background:#fff0f0; color:#7b0000; font-size:12px;">AI-generated fake news spreads even faster now</div></li>
+        </ul>
+      </div>
+    </div>
+
+    <h2 class="section-title">What Does AI Mean for YOUR Career? 🎯</h2>
+    <p style="font-size:13px; line-height:1.7; margin-bottom:12px;">Some jobs will disappear. But <strong>many more new jobs will be created</strong>. The question is: will you be ready? The jobs of the future need people who can <em>work WITH AI</em>, not just people who memorize facts.</p>
+    <div class="card-grid">
+      <div class="card">
+        <span class="card-icon">💼</span>
+        <div class="card-title">Jobs AI CANNOT replace</div>
+        <div class="card-desc">Critical thinking, creativity, human empathy, leadership, complex problem-solving, teaching, entrepreneurship.</div>
+      </div>
+      <div class="card">
+        <span class="card-icon">🚀</span>
+        <div class="card-title">New careers to explore</div>
+        <div class="card-desc">AI trainer, data analyst, cybersecurity expert, software developer, digital content creator, UX designer.</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">Ethical AI Use — Think Before You Use It 🧭</h2>
+    <ul class="tip-list">
+      <li data-icon="📝">If AI helps you write something, tell your teacher. Honesty builds trust.</li>
+      <li data-icon="🤔">Always question AI outputs — verify facts before sharing or submitting them.</li>
+      <li data-icon="🛑">Never use AI to create fake images of real people or spread misinformation.</li>
+      <li data-icon="🔏">Be careful about what personal information you share with AI apps and chatbots.</li>
+    </ul>
+
+    <div class="quiz-box">
+      <div class="quiz-title">⚡ Final Quiz</div>
+      <div class="quiz-q">Your friend sends you a shocking video showing a politician saying something terrible. It looks very real. Before you share it in your class group, what should you do?</div>
+      <div class="quiz-options">
+        <div class="quiz-opt">A. Share it — it looks real so it must be real</div>
+        <div class="quiz-opt">B. Check if trusted news sources report it ✓</div>
+        <div class="quiz-opt">C. Ask ChatGPT if it's real</div>
+        <div class="quiz-opt">D. It could be a deepfake — report and don't share ✓</div>
+      </div>
+    </div>
+
+    <div class="discuss-box">
+      <div class="discuss-title">💬 Final Discussion</div>
+      <div class="discuss-q">1. If AI can do homework, why should students still learn? What is school actually for?</div>
+      <div class="discuss-q">2. Should Tanzania have laws controlling AI? Who should make the rules?</div>
+      <div class="discuss-q">3. What problem in your community could AI help solve?</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     BACK COVER
+═══════════════════════════════════════════════ -->
+<div class="page">
+<div class="back-cover">
+  <div class="back-grid"></div>
+  <div class="back-content">
+    <div class="back-logo">DIGIT<span>.</span></div>
+    <div class="back-tagline">Digital Intelligence & Growth through Inclusive Technology</div>
+
+    <div class="back-rules">
+      <div class="back-rule">
+        <span class="back-rule-icon">🧠</span>
+        <div class="back-rule-text">Think before you click, share, or download</div>
+      </div>
+      <div class="back-rule">
+        <span class="back-rule-icon">🔐</span>
+        <div class="back-rule-text">Protect your password like your M-Pesa PIN</div>
+      </div>
+      <div class="back-rule">
+        <span class="back-rule-icon">🌍</span>
+        <div class="back-rule-text">Use technology to solve real community problems</div>
+      </div>
+      <div class="back-rule">
+        <span class="back-rule-icon">📚</span>
+        <div class="back-rule-text">Never stop learning — the internet is your library</div>
+      </div>
+      <div class="back-rule">
+        <span class="back-rule-icon">⚖️</span>
+        <div class="back-rule-text">Use AI as a tool, not a replacement for your brain</div>
+      </div>
+      <div class="back-rule">
+        <span class="back-rule-icon">🤝</span>
+        <div class="back-rule-text">Be kind online. Your words have real impact</div>
+      </div>
+    </div>
+
+    <div class="back-pledge">
+      <strong>The Digital Citizen's Pledge:</strong><br>
+      I will use technology <strong>wisely</strong>, protect my <strong>privacy</strong>,<br>
+      think critically about what I <strong>read and share</strong>,<br>
+      and use my digital skills to <strong>uplift my community</strong>.
+    </div>
+
+    <p style="margin-top:36px; font-size:12px; color:rgba(255,255,255,0.2); letter-spacing:1px; text-transform:uppercase;">
+      Produced by DIGIT Club · IT &amp; BCS Students · Community Outreach Programme · Tanzania 2025
+    </p>
+  </div>
+</div>
+</div>
+
+</body>
+</html>

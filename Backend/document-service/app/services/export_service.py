@@ -10,7 +10,7 @@ from time import perf_counter
 
 import httpx
 from flask import current_app
-from sqlalchemy import Float, cast, func
+from sqlalchemy import Integer, cast, func
 
 from app.extensions import db
 from app.models import ExportEvent
@@ -384,12 +384,13 @@ def export_analytics(limit: int = 20) -> dict:
     total = ExportEvent.query.count()
     failed = ExportEvent.query.filter_by(status="failed").count()
 
+    # PostgreSQL cannot CAST(boolean AS float); use integer 0/1 for AVG(cache_hit).
     by_format_rows = (
         db.session.query(
             ExportEvent.export_format,
             func.count(ExportEvent.id),
             func.avg(ExportEvent.duration_ms),
-            func.avg(cast(ExportEvent.cache_hit, Float)),
+            func.avg(cast(ExportEvent.cache_hit, Integer)),
             func.sum(ExportEvent.size_bytes),
         )
         .group_by(ExportEvent.export_format)

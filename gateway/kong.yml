@@ -1,11 +1,49 @@
 _format_version: "3.0"
 _transform: true
 
+# Upstreams use Docker DNS hostnames so Kong re-resolves after container recreate
+# (avoids stale IPs and "invalid response" / connection refused through the proxy).
+upstreams:
+  - name: auth-upstream
+    targets:
+      - target: auth-service:5001
+        weight: 100
+  - name: timetable-upstream
+    targets:
+      - target: timetable-engine:5002
+        weight: 100
+  - name: adjustment-upstream
+    targets:
+      - target: adjustment-engine:5003
+        weight: 100
+  - name: notification-upstream
+    targets:
+      - target: notification-service:5004
+        weight: 100
+  - name: calendar-upstream
+    targets:
+      - target: calendar-service:5005
+        weight: 100
+  - name: document-upstream
+    targets:
+      - target: document-service:5006
+        weight: 100
+  - name: analytics-upstream
+    targets:
+      - target: analytics-service:5007
+        weight: 100
+  - name: audit-upstream
+    targets:
+      - target: audit-service:5008
+        weight: 100
+
 # ─── Services ─────────────────────────────────────────────────────────────────
 services:
 
   - name: auth-service
-    url: http://auth-service:5001
+    protocol: http
+    host: auth-upstream
+    port: 80
     routes:
       - name: auth-routes
         paths:
@@ -19,7 +57,9 @@ services:
           policy: local
 
   - name: timetable-service
-    url: http://timetable-engine:5002
+    protocol: http
+    host: timetable-upstream
+    port: 80
     routes:
       - name: timetable-routes
         paths:
@@ -41,7 +81,9 @@ services:
           policy: local
 
   - name: adjustment-service
-    url: http://adjustment-engine:5003
+    protocol: http
+    host: adjustment-upstream
+    port: 80
     routes:
       - name: adjustment-routes
         paths:
@@ -57,7 +99,9 @@ services:
           policy: local
 
   - name: notification-service
-    url: http://notification-service:5004
+    protocol: http
+    host: notification-upstream
+    port: 80
     routes:
       - name: notification-routes
         paths:
@@ -73,7 +117,9 @@ services:
           policy: local
 
   - name: calendar-service
-    url: http://calendar-service:5005
+    protocol: http
+    host: calendar-upstream
+    port: 80
     routes:
       - name: calendar-routes
         paths:
@@ -85,7 +131,9 @@ services:
           secret_is_base64: false
 
   - name: document-service
-    url: http://document-service:5006
+    protocol: http
+    host: document-upstream
+    port: 80
     routes:
       - name: document-routes
         paths:
@@ -97,7 +145,9 @@ services:
           secret_is_base64: false
 
   - name: analytics-service
-    url: http://analytics-service:5007
+    protocol: http
+    host: analytics-upstream
+    port: 80
     routes:
       - name: analytics-routes
         paths:
@@ -109,7 +159,9 @@ services:
           secret_is_base64: false
 
   - name: audit-service
-    url: http://audit-service:5008
+    protocol: http
+    host: audit-upstream
+    port: 80
     routes:
       - name: audit-routes
         paths:
