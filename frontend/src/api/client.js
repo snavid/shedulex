@@ -8,6 +8,12 @@ const api = axios.create({
   headers: { "Content-Type": "application/json" },
 })
 
+export function getErrorMessage(error, fallback = "Request failed.") {
+  const payload = error?.response?.data
+  if (typeof payload === "string" && payload) return payload
+  return payload?.message || payload?.error || error?.message || fallback
+}
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("access_token")
   if (token) config.headers.Authorization = `Bearer ${token}`
@@ -18,6 +24,17 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config
+    const message = (error?.response?.data?.message || "").toLowerCase()
+
+    if (error.response?.status === 401 && message.includes("mandatory 'iss'")) {
+      localStorage.removeItem("access_token")
+      localStorage.removeItem("refresh_token")
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login?reason=session"
+      }
+      return Promise.reject(error)
+    }
+
     if (error.response?.status === 401 && !original._retry) {
       original._retry = true
       const refreshToken = localStorage.getItem("refresh_token")

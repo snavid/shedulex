@@ -8,8 +8,10 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_size": 10, "max_overflow": 20}
 
-    # JWT
+    # JWT (JWT_ISSUER env must match Kong jwt_secrets.key for gateway JWT validation)
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "jwt-secret-change-me")
+    JWT_ENCODE_ISSUER = os.environ.get("JWT_ISSUER", "shedulex")
+    JWT_DECODE_ISSUER = os.environ.get("JWT_ISSUER", "shedulex")
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(seconds=int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRES", 3600)))
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(seconds=int(os.environ.get("JWT_REFRESH_TOKEN_EXPIRES", 2592000)))
     JWT_BLACKLIST_ENABLED = True

@@ -21,7 +21,12 @@ const router = createRouter({
         { path: "dashboard", name: "dashboard", component: () => import("@/views/DashboardView.vue") },
         { path: "timetable", name: "timetable", component: () => import("@/views/timetable/TimetableView.vue") },
         { path: "timetable/:id", name: "timetable-detail", component: () => import("@/views/timetable/TimetableDetailView.vue") },
-        { path: "generate", name: "generate", component: () => import("@/views/timetable/GenerateView.vue") },
+        {
+          path: "generate",
+          name: "generate",
+          component: () => import("@/views/timetable/GenerateView.vue"),
+          meta: { roles: ["admin", "timetable_officer"] },
+        },
         { path: "resources/departments", name: "departments", component: () => import("@/views/resources/DepartmentsView.vue") },
         { path: "resources/rooms", name: "rooms", component: () => import("@/views/resources/RoomsView.vue") },
         { path: "resources/lecturers", name: "lecturers", component: () => import("@/views/resources/LecturersView.vue") },

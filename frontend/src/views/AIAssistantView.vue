@@ -1,13 +1,16 @@
 <script setup>
-import { ref } from "vue"
-import { adjustmentApi } from "@/api/client"
+import { onMounted, ref } from "vue"
+import { adjustmentApi, timetableApi } from "@/api/client"
+import { getErrorMessage } from "@/api/client"
 import { useToast } from "vue-toastification"
 
 const toast = useToast()
 const prompt = ref("")
 const timetableId = ref("")
 const loading = ref(false)
+const loadingTimetables = ref(false)
 const messages = ref([])
+const timetables = ref([])
 
 const quickPrompts = [
   "Move Database class to Friday afternoon",
@@ -16,9 +19,21 @@ const quickPrompts = [
   "Suggest best venue for 120 students",
 ]
 
+onMounted(async () => {
+  loadingTimetables.value = true
+  try {
+    const { data } = await timetableApi.list()
+    timetables.value = data.data || []
+  } catch {
+    toast.error("Failed to load timetables.")
+  } finally {
+    loadingTimetables.value = false
+  }
+})
+
 async function sendPrompt() {
   if (!prompt.value || !timetableId.value) {
-    toast.error("Provide timetable ID and prompt.")
+    toast.error("Select a timetable and provide a prompt.")
     return
   }
   loading.value = true
@@ -27,9 +42,10 @@ async function sendPrompt() {
   prompt.value = ""
   try {
     const { data } = await adjustmentApi.chat({ prompt: userText, timetable_id: timetableId.value })
-    messages.value.push({ role: "assistant", text: data.data.response })
+    const responseText = data?.data?.response || data?.response || "AI request completed."
+    messages.value.push({ role: "assistant", text: responseText })
   } catch (err) {
-    const msg = err.response?.data?.message || "AI request failed."
+    const msg = getErrorMessage(err, "AI request failed.")
     messages.value.push({ role: "assistant", text: msg })
     toast.error(msg)
   } finally {
@@ -46,8 +62,15 @@ async function sendPrompt() {
     </div>
 
     <div class="card space-y-3">
-      <label class="label">Timetable ID</label>
-      <input v-model="timetableId" class="input" placeholder="Paste timetable UUID" />
+      <label class="label">Timetable</label>
+      <select v-model="timetableId" class="input" :disabled="loadingTimetables">
+        <option value="">
+          {{ loadingTimetables ? "Loading timetables..." : "Select timetable..." }}
+        </option>
+        <option v-for="tt in timetables" :key="tt.id" :value="tt.id">
+          {{ tt.name }} - Semester {{ tt.semester }} - {{ tt.academic_year }}
+        </option>
+      </select>
       <div class="flex flex-wrap gap-2">
         <button
           v-for="q in quickPrompts"

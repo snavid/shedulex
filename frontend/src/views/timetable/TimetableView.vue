@@ -1,14 +1,25 @@
 <script setup>
 import { ref, onMounted } from "vue"
 import { useTimetableStore } from "@/stores/timetable"
+import { useAuthStore } from "@/stores/auth"
+import { getErrorMessage } from "@/api/client"
 
 const store = useTimetableStore()
+const auth = useAuthStore()
 const loading = ref(true)
 const statusFilter = ref("")
+const error = ref("")
 
 onMounted(async () => {
-  await store.fetchTimetables()
-  loading.value = false
+  loading.value = true
+  error.value = ""
+  try {
+    await store.fetchTimetables()
+  } catch (e) {
+    error.value = getErrorMessage(e, "Failed to load timetables.")
+  } finally {
+    loading.value = false
+  }
 })
 
 const statusColors = {
@@ -27,7 +38,7 @@ const statusColors = {
         <h1 class="text-2xl font-bold text-gray-900">Timetables</h1>
         <p class="text-gray-500 text-sm mt-1">All generated timetables across departments</p>
       </div>
-      <RouterLink to="/generate" class="btn-primary flex items-center gap-2">
+      <RouterLink v-if="auth.isTimetableOfficer" to="/generate" class="btn-primary flex items-center gap-2">
         <span>⚡</span> Generate New
       </RouterLink>
     </div>
@@ -54,12 +65,16 @@ const statusColors = {
       </div>
     </div>
 
+    <div v-else-if="error" class="card border-red-200 bg-red-50 text-red-700 text-sm">
+      {{ error }}
+    </div>
+
     <!-- Empty state -->
     <div v-else-if="!store.timetables.length" class="card text-center py-12">
       <div class="text-5xl mb-4">📅</div>
       <h3 class="font-semibold text-gray-900 mb-2">No timetables yet</h3>
       <p class="text-gray-500 text-sm mb-4">Generate your first timetable using the Genetic Algorithm engine.</p>
-      <RouterLink to="/generate" class="btn-primary inline-flex items-center gap-2">
+      <RouterLink v-if="auth.isTimetableOfficer" to="/generate" class="btn-primary inline-flex items-center gap-2">
         <span>⚡</span> Generate First Timetable
       </RouterLink>
     </div>

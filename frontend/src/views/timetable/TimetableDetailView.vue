@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue"
 import { useRoute } from "vue-router"
 import { useToast } from "vue-toastification"
 
-import { documentApi } from "@/api/client"
+import { documentApi, getErrorMessage } from "@/api/client"
 import { useTimetableStore } from "@/stores/timetable"
 
 const route = useRoute()
@@ -20,6 +20,7 @@ const shareLink = ref("")
 const shareFormat = ref("bundle")
 const shareExpiresHours = ref(24)
 const exportStatus = ref("")
+const pageError = ref("")
 
 const exportOps = ref({
   pdf: false,
@@ -220,9 +221,16 @@ async function detectConflicts() {
 }
 
 onMounted(async () => {
-  await store.fetchTimetable(route.params.id)
-  loading.value = false
-  await Promise.all([loadExportPreview(), loadExportAnalytics()])
+  loading.value = true
+  pageError.value = ""
+  try {
+    await store.fetchTimetable(route.params.id)
+    await Promise.all([loadExportPreview(), loadExportAnalytics()])
+  } catch (e) {
+    pageError.value = getErrorMessage(e, "Failed to load timetable details.")
+  } finally {
+    loading.value = false
+  }
 })
 </script>
 
@@ -231,6 +239,10 @@ onMounted(async () => {
     <div v-if="loading" class="animate-pulse space-y-4">
       <div class="h-8 bg-gray-200 rounded w-1/3"></div>
       <div class="card h-96 bg-gray-200 rounded"></div>
+    </div>
+
+    <div v-else-if="pageError" class="card border-red-200 bg-red-50 text-red-700 text-sm">
+      {{ pageError }}
     </div>
 
     <template v-else-if="store.currentTimetable">

@@ -11,7 +11,6 @@ const navItems = computed(() => {
   const base = [
     { to: "/dashboard", label: "Dashboard", icon: "📊" },
     { to: "/timetable", label: "Timetables", icon: "📅" },
-    { to: "/generate", label: "Generate", icon: "⚡" },
     { to: "/ai-assistant", label: "AI Assistant", icon: "🤖" },
     { to: "/calendar", label: "Calendar", icon: "🗓️" },
     { to: "/analytics", label: "Analytics", icon: "📈" },
@@ -23,6 +22,9 @@ const navItems = computed(() => {
     { to: "/resources/courses", label: "Courses", icon: "📚" },
     { to: "/resources/constraints", label: "Constraints", icon: "⚙️" },
   ]
+  if (auth.isTimetableOfficer) {
+    base.splice(2, 0, { to: "/generate", label: "Generate", icon: "⚡" })
+  }
   if (auth.isAdmin) {
     base.push(
       { section: "Admin" },

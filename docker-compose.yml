@@ -3,6 +3,17 @@ networks:
   shedulex-net:
     driver: bridge
 
+# Kong JWT consumer (interpolated from .env; merged into declarative config at container start)
+configs:
+  kong_jwt_consumers_fragment:
+    content: |
+      consumers:
+        - username: shedulex-jwt
+          jwt_secrets:
+            - algorithm: HS256
+              key: ${JWT_ISSUER:-shedulex}
+              secret: ${JWT_SECRET_KEY:-jwt-secret-change-me}
+
 # ─── Volumes ──────────────────────────────────────────────────────────────────
 volumes:
   postgres_data:
@@ -56,7 +67,8 @@ services:
     container_name: shedulex-kong
     environment:
       KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      # Merged at startup: base routes + consumers fragment (JWT key/secret from configs)
+      KONG_DECLARATIVE_CONFIG: /tmp/kong-merged.yml
       # All bundled Lua plugins (explicit list avoids "plugin X not enabled" on slim defaults)
       KONG_PLUGINS: bundled
       KONG_PROXY_ACCESS_LOG: /dev/stdout
@@ -65,8 +77,19 @@ services:
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: "0.0.0.0:8001"
       KONG_PROXY_LISTEN: "0.0.0.0:8000"
+    configs:
+      - source: kong_jwt_consumers_fragment
+        target: /etc/kong/kong-consumers-fragment.yml
+        mode: 0444
     volumes:
       - ./gateway/kong.yml:/etc/kong/kong.yml:ro
+    command:
+      - sh
+      - -c
+      - |
+          set -e
+          cat /etc/kong/kong.yml /etc/kong/kong-consumers-fragment.yml > /tmp/kong-merged.yml
+          exec /docker-entrypoint.sh kong docker-start
     ports:
       - "8000:8000"   # proxy
       - "8001:8001"   # admin API

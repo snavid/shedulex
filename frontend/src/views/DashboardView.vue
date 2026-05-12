@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from "vue"
+import { computed, ref, onMounted } from "vue"
 import { useAuthStore } from "@/stores/auth"
 import { analyticsApi } from "@/api/client"
 import { useRouter } from "vue-router"
@@ -9,12 +9,17 @@ const router = useRouter()
 const stats = ref(null)
 const loading = ref(true)
 
-const quickActions = [
-  { label: "Generate Timetable", icon: "⚡", to: "/generate", color: "bg-blue-600" },
-  { label: "AI Assistant", icon: "🤖", to: "/ai-assistant", color: "bg-purple-600" },
-  { label: "View Calendar", icon: "🗓️", to: "/calendar", color: "bg-green-600" },
-  { label: "Analytics", icon: "📈", to: "/analytics", color: "bg-orange-600" },
-]
+const quickActions = computed(() => {
+  const actions = [
+    { label: "AI Assistant", icon: "🤖", to: "/ai-assistant", color: "bg-purple-600" },
+    { label: "View Calendar", icon: "🗓️", to: "/calendar", color: "bg-green-600" },
+    { label: "Analytics", icon: "📈", to: "/analytics", color: "bg-orange-600" },
+  ]
+  if (auth.isTimetableOfficer) {
+    actions.unshift({ label: "Generate Timetable", icon: "⚡", to: "/generate", color: "bg-blue-600" })
+  }
+  return actions
+})
 
 onMounted(async () => {
   try {
