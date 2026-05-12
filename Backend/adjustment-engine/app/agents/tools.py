@@ -28,6 +28,13 @@ def _post(path: str, payload: dict) -> dict:
         return resp.json()
 
 
+def _patch(path: str, payload: dict) -> dict:
+    with httpx.Client(timeout=15) as client:
+        resp = client.patch(f"{TIMETABLE_URL}{path}", json=payload, headers=_headers())
+        resp.raise_for_status()
+        return resp.json()
+
+
 @tool
 def get_timetable_entries(timetable_id: str) -> str:
     """Fetch all entries in a given timetable. Returns JSON of entries."""
@@ -97,6 +104,16 @@ def swap_timetable_entries(entry1_id: str, entry2_id: str) -> str:
 
 
 @tool
+def move_timetable_entry(entry_id: str, time_slot_id: str) -> str:
+    """Move one timetable entry to a different time slot (no swap). Use when the target slot is free for that lecturer and room."""
+    try:
+        result = _patch(f"/api/v1/timetable/entries/{entry_id}", {"time_slot_id": time_slot_id})
+        return f"Move successful: {result}"
+    except Exception as e:
+        return f"Move failed: {e}"
+
+
+@tool
 def suggest_best_venue(student_count: int, requires_lab: bool = False) -> str:
     """Suggest the best available venue for a class given student count and requirements."""
     try:
@@ -123,5 +140,6 @@ ALL_TOOLS = [
     get_available_rooms,
     get_lecturer_free_slots,
     swap_timetable_entries,
+    move_timetable_entry,
     suggest_best_venue,
 ]

@@ -76,6 +76,11 @@ export const timetableApi = {
   get: (id) => api.get(`/timetable/${id}`),
   conflicts: (id) => api.get(`/timetable/${id}/conflicts`),
   swapEntries: (data) => api.post("/timetable/entries/swap", data),
+  moveEntry: (entryId, time_slot_id) =>
+    api.patch(`/timetable/entries/${entryId}`, { time_slot_id }),
+  listVersions: (timetableId) => api.get(`/timetable/${timetableId}/versions`),
+  createVersion: (timetableId, data) => api.post(`/timetable/${timetableId}/versions`, data),
+  restoreVersion: (snapshotId) => api.post(`/timetable/versions/${snapshotId}/restore`),
 }
 
 export const resourcesApi = {
@@ -101,7 +106,9 @@ export const resourcesApi = {
 }
 
 export const adjustmentApi = {
-  chat: (data) => api.post("/adjustments/chat", data),
+  // AI chat can run longer due to LLM/tool execution cycles.
+  chat: (data) => api.post("/adjustments/chat", data, { timeout: 180000 }),
+  requestStatus: (requestId) => api.get(`/adjustments/requests/${requestId}`),
   history: (params) => api.get("/adjustments/history", { params }),
   conflicts: (params) => api.get("/adjustments/conflicts", { params }),
   suggestSlots: (data) => api.post("/adjustments/suggest-slots", data),

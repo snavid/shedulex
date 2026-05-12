@@ -169,12 +169,52 @@ def swap_entries(entry1_id: str, entry2_id: str) -> tuple:
     e2 = TimetableEntry.query.get(entry2_id)
     if not e1 or not e2:
         raise ValueError("One or both entries not found.")
+    if e1.timetable_id != e2.timetable_id:
+        raise ValueError("Entries must belong to the same timetable.")
     if e1.is_locked or e2.is_locked:
         raise ValueError("Cannot move locked entries.")
 
     e1.time_slot_id, e2.time_slot_id = e2.time_slot_id, e1.time_slot_id
     db.session.commit()
     return e1, e2
+
+
+def move_entry_to_slot(entry_id: str, time_slot_id: str) -> TimetableEntry:
+    """Move one entry to another time slot without swapping (target slot must be free for room/lecturer)."""
+    entry = TimetableEntry.query.get(entry_id)
+    if not entry:
+        raise ValueError("Entry not found.")
+    if entry.is_locked:
+        raise ValueError("Cannot move locked entry.")
+
+    slot = TimeSlot.query.get(time_slot_id)
+    if not slot:
+        raise ValueError("Time slot not found.")
+
+    if entry.time_slot_id == time_slot_id:
+        return entry
+
+    timetable_id = entry.timetable_id
+    others = (
+        TimetableEntry.query.filter_by(timetable_id=timetable_id)
+        .filter(TimetableEntry.id != entry.id)
+        .all()
+    )
+
+    for o in others:
+        if o.time_slot_id != time_slot_id:
+            continue
+        if o.lecturer_id == entry.lecturer_id:
+            raise ValueError("Lecturer is already scheduled in the target time slot.")
+        if o.room_id == entry.room_id:
+            raise ValueError("Room is already booked in the target time slot.")
+
+    entry.time_slot_id = time_slot_id
+    timetable = Timetable.query.get(timetable_id)
+    if timetable:
+        timetable.version = (timetable.version or 1) + 1
+    db.session.commit()
+    return entry
 
 
 def detect_conflicts(timetable_id: str) -> list[dict]:

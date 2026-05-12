@@ -1,13 +1,15 @@
 <script setup>
-import { computed, onMounted, ref } from "vue"
+import { computed, ref, watch } from "vue"
 import { useRoute } from "vue-router"
 import { useToast } from "vue-toastification"
 
-import { documentApi, getErrorMessage } from "@/api/client"
+import { documentApi, getErrorMessage, timetableApi } from "@/api/client"
 import { useTimetableStore } from "@/stores/timetable"
+import { useAuthStore } from "@/stores/auth"
 
 const route = useRoute()
 const store = useTimetableStore()
+const auth = useAuthStore()
 const toast = useToast()
 
 const loading = ref(true)
@@ -21,6 +23,9 @@ const shareFormat = ref("bundle")
 const shareExpiresHours = ref(24)
 const exportStatus = ref("")
 const pageError = ref("")
+const versions = ref([])
+const versionsLoading = ref(false)
+const restoringSnapshotId = ref("")
 
 const exportOps = ref({
   pdf: false,
@@ -206,6 +211,33 @@ async function copyShareLink() {
   }
 }
 
+async function loadVersions() {
+  versionsLoading.value = true
+  try {
+    const { data } = await timetableApi.listVersions(route.params.id)
+    versions.value = data.data || []
+  } catch {
+    versions.value = []
+  } finally {
+    versionsLoading.value = false
+  }
+}
+
+async function restoreSnapshot(snapshotId) {
+  if (!window.confirm("Restore this snapshot? Current timetable entries will be replaced.")) return
+  restoringSnapshotId.value = snapshotId
+  try {
+    await timetableApi.restoreVersion(snapshotId)
+    toast.success("Timetable restored from snapshot.")
+    await store.fetchTimetable(route.params.id)
+    await loadVersions()
+  } catch (e) {
+    toast.error(getErrorMessage(e, "Could not restore version."))
+  } finally {
+    restoringSnapshotId.value = ""
+  }
+}
+
 async function detectConflicts() {
   conflictsLoading.value = true
   try {
@@ -220,18 +252,25 @@ async function detectConflicts() {
   }
 }
 
-onMounted(async () => {
+async function loadTimetablePage(id) {
+  if (!id) return
   loading.value = true
   pageError.value = ""
   try {
-    await store.fetchTimetable(route.params.id)
-    await Promise.all([loadExportPreview(), loadExportAnalytics()])
+    await store.fetchTimetable(id)
+    await Promise.all([loadExportPreview(), loadExportAnalytics(), loadVersions()])
   } catch (e) {
     pageError.value = getErrorMessage(e, "Failed to load timetable details.")
   } finally {
     loading.value = false
   }
-})
+}
+
+watch(
+  () => route.params.id,
+  (id) => loadTimetablePage(id),
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -363,6 +402,42 @@ onMounted(async () => {
             </ul>
           </div>
         </div>
+      </div>
+
+      <div class="card space-y-3">
+        <div class="flex items-center justify-between">
+          <h2 class="font-semibold text-gray-900">Version snapshots</h2>
+          <span v-if="versionsLoading" class="text-xs text-gray-500">Loading…</span>
+        </div>
+        <p class="text-xs text-gray-500">
+          Snapshots are saved automatically before and after AI adjustments. Restore replaces current slots with the snapshot (admins and timetable officers).
+        </p>
+        <p v-if="!versions.length && !versionsLoading" class="text-sm text-gray-500">No snapshots yet.</p>
+        <ul v-else class="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
+          <li
+            v-for="v in versions"
+            :key="v.id"
+            class="flex flex-wrap items-center justify-between gap-2 px-3 py-3 bg-white"
+          >
+            <div class="min-w-0">
+              <p class="text-sm font-medium text-gray-900 truncate">{{ v.notes || "Snapshot" }}</p>
+              <p class="text-xs text-gray-500">
+                {{ new Date(v.created_at).toLocaleString() }}
+                · version {{ v.version }}
+                · {{ v.entry_count }} entries
+              </p>
+            </div>
+            <button
+              v-if="auth.isTimetableOfficer"
+              type="button"
+              class="btn-secondary text-xs shrink-0"
+              :disabled="restoringSnapshotId === v.id"
+              @click="restoreSnapshot(v.id)"
+            >
+              {{ restoringSnapshotId === v.id ? "Restoring…" : "Restore" }}
+            </button>
+          </li>
+        </ul>
       </div>
 
       <div v-if="store.conflicts.length" class="card border-red-200 bg-red-50">

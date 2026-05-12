@@ -1,6 +1,26 @@
+import json
 import uuid
 from datetime import datetime, timezone
 from app.extensions import db
+
+TOOL_TRACE_MARKER = "\n___TOOL_TRACE___\n"
+
+
+def split_response_and_trace(raw: str | None) -> tuple[str, list]:
+    """Separate assistant-visible text from appended JSON tool trace."""
+    if not raw:
+        return "", []
+    if TOOL_TRACE_MARKER not in raw:
+        return raw.strip(), []
+    text_part, rest = raw.split(TOOL_TRACE_MARKER, 1)
+    text_part = text_part.strip()
+    try:
+        trace = json.loads(rest.strip())
+        if not isinstance(trace, list):
+            return text_part, []
+    except json.JSONDecodeError:
+        return raw.strip(), []
+    return text_part, trace
 
 
 class AdjustmentRequest(db.Model):
@@ -17,11 +37,13 @@ class AdjustmentRequest(db.Model):
     completed_at = db.Column(db.DateTime(timezone=True))
 
     def to_dict(self):
+        text, trace = split_response_and_trace(self.response)
         return {
             "id": self.id,
             "timetable_id": self.timetable_id,
             "prompt": self.prompt,
-            "response": self.response,
+            "response": text,
+            "tool_trace": trace,
             "status": self.status,
             "conflict_reason": self.conflict_reason,
             "created_at": self.created_at.isoformat(),

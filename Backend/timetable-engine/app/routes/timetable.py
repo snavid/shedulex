@@ -78,6 +78,23 @@ def swap_entries():
     return ok(data={"entry1": e1.to_dict(), "entry2": e2.to_dict()})
 
 
+@timetable_bp.patch("/entries/<entry_id>")
+@service_or_jwt_required("admin", "timetable_officer")
+def move_entry(entry_id):
+    """Assign a single entry to a new time slot (no swap). Internal services may call via X-Internal-Service-Key."""
+    body = json_body()
+    slot_id = body.get("time_slot_id")
+    if not slot_id:
+        return fail("time_slot_id is required.", status=422)
+
+    try:
+        entry = timetable_service.move_entry_to_slot(entry_id, slot_id)
+    except ValueError as ex:
+        return fail(str(ex), status=400)
+
+    return ok(data=entry.to_dict())
+
+
 @timetable_bp.get("/entries")
 @service_or_jwt_required()
 def list_entries():
