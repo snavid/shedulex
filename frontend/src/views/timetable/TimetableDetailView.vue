@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from "vue"
+import { computed, reactive, ref, watch } from "vue"
 import { useRoute } from "vue-router"
 import { useToast } from "vue-toastification"
 
@@ -44,6 +44,150 @@ const sendingReminder = ref(false)
 
 const exportOps = ref({ pdf: false, excel: false, csv: false, bundle: false, share: false })
 const templateBlocks = ref([])
+
+// ── Drag & Drop ───────────────────────────────────────────────────────────────
+const allTimeSlots = ref([])          // from GET /time-slots
+const draggingEntry = ref(null)       // entry currently being dragged
+const dragOverCell = ref(null)        // "Day__HH:MM" of the cell being hovered
+
+// Full slot lookup: slotMap[day][start_time] = TimeSlot
+// Built from API slots (covers empty cells) + entry slots (authoritative IDs)
+const slotMap = computed(() => {
+  const map = {}
+  for (const s of allTimeSlots.value) {
+    if (!map[s.day]) map[s.day] = {}
+    map[s.day][s.start_time] = s
+  }
+  for (const e of (store.currentTimetable?.entries || [])) {
+    const s = e.time_slot
+    if (!s?.id) continue
+    if (!map[s.day]) map[s.day] = {}
+    map[s.day][s.start_time] = s
+  }
+  return map
+})
+
+const moveModal = reactive({
+  visible: false,
+  entry: null,
+  fromSlot: null,
+  targetSlot: null,
+  conflicts: [],
+  moving: false,
+})
+
+function isBreakSlot(slot) {
+  return !!(slot.is_break || ["break", "lunch"].includes(slot.slot_type || slot.block_type))
+}
+
+function onDragStart(evt, entry) {
+  if (entry.is_locked || !auth.isAdmin && !auth.isTimetableOfficer) {
+    evt.preventDefault(); return
+  }
+  draggingEntry.value = entry
+  evt.dataTransfer.effectAllowed = "move"
+  evt.dataTransfer.setData("text/plain", entry.id)
+}
+
+function onDragEnd() {
+  draggingEntry.value = null
+  dragOverCell.value = null
+}
+
+function onDragOver(evt, day, slot) {
+  if (!draggingEntry.value || isBreakSlot(slot)) return
+  evt.preventDefault()
+  evt.dataTransfer.dropEffect = "move"
+  dragOverCell.value = `${day}__${slot.start_time}`
+}
+
+function onDragLeave(evt) {
+  if (!evt.currentTarget.contains(evt.relatedTarget)) {
+    dragOverCell.value = null
+  }
+}
+
+function onDrop(evt, day, slot) {
+  evt.preventDefault()
+  dragOverCell.value = null
+  if (!draggingEntry.value || isBreakSlot(slot)) return
+
+  const entry = draggingEntry.value
+  draggingEntry.value = null
+
+  // No-op if dropped back on the same cell
+  if (entry.time_slot?.day === day && entry.time_slot?.start_time === slot.start_time) return
+
+  // Resolve the TimeSlot object for this (day, start_time)
+  const targetSlot = slotMap.value[day]?.[slot.start_time]
+  if (!targetSlot?.id) {
+    toast.error(`No time slot found for ${day} ${slot.start_time}. Re-generate slots from a template first.`)
+    return
+  }
+
+  const conflicts = detectMoveConflicts(entry, day, slot.start_time)
+  Object.assign(moveModal, {
+    visible: true, entry,
+    fromSlot: entry.time_slot,
+    targetSlot: { ...targetSlot, day },
+    conflicts, moving: false,
+  })
+}
+
+function detectMoveConflicts(entry, targetDay, targetStartTime) {
+  const conflicts = []
+  const occupants = timetableGrid.value[`${targetDay}__${targetStartTime}`] || []
+  for (const other of occupants) {
+    if (other.id === entry.id) continue
+    if (entry.lecturer?.id && other.lecturer?.id === entry.lecturer.id) {
+      conflicts.push({
+        type: "lecturer", icon: "👤", label: "Lecturer Conflict",
+        detail: `${entry.lecturer.name} is already teaching`,
+        conflicting: other,
+      })
+    }
+    if (entry.room?.id && other.room?.id === entry.room.id) {
+      conflicts.push({
+        type: "room", icon: "🏛", label: "Room Conflict",
+        detail: `${entry.room.name} (${entry.room.code}) is already occupied`,
+        conflicting: other,
+      })
+    }
+    if (entry.student_group?.id && other.student_group?.id === entry.student_group.id) {
+      conflicts.push({
+        type: "group", icon: "👥", label: "Student Group Conflict",
+        detail: `${entry.student_group.name} already has a session`,
+        conflicting: other,
+      })
+    }
+  }
+  return conflicts
+}
+
+async function confirmMove() {
+  moveModal.moving = true
+  try {
+    await timetableApi.moveEntry(moveModal.entry.id, moveModal.targetSlot.id)
+    toast.success(`Moved ${moveModal.entry.course?.code} → ${moveModal.targetSlot.day} ${moveModal.targetSlot.start_time}`)
+    moveModal.visible = false
+    await store.fetchTimetable(route.params.id)
+    const tid = store.currentTimetable?.template_id
+    if (tid) resourcesApi.getTemplate(tid)
+      .then(({ data }) => { templateBlocks.value = data.data?.blocks || [] })
+      .catch(() => {})
+  } catch (e) {
+    toast.error(getErrorMessage(e, "Failed to move session."))
+  } finally {
+    moveModal.moving = false
+  }
+}
+
+async function loadAllSlots() {
+  try {
+    const { data } = await resourcesApi.timeSlots()
+    allTimeSlots.value = data.data || []
+  } catch { allTimeSlots.value = [] }
+}
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
@@ -387,6 +531,7 @@ async function loadTimetablePage(id) {
       loadExportPreview(),
       loadExportAnalytics(),
       loadVersions(),
+      loadAllSlots(),
       templateId
         ? resourcesApi.getTemplate(templateId)
             .then(({ data }) => { templateBlocks.value = data.data?.blocks || [] })
@@ -560,6 +705,12 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
 
         <!-- WEEK VIEW -->
         <div v-if="calendarView === 'week'" class="overflow-x-auto">
+          <div v-if="auth.isAdmin || auth.isTimetableOfficer" class="px-4 py-2 text-xs text-blue-600 bg-blue-50 border-b border-blue-100 flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/>
+            </svg>
+            Drag sessions to reschedule · Locked sessions cannot be moved
+          </div>
           <table class="w-full border-collapse min-w-[700px]">
             <thead>
               <tr>
@@ -568,33 +719,59 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
               </tr>
             </thead>
             <tbody>
-              <tr v-for="slot in timeSlots" :key="slot.id"
-                :class="(slot.is_break || ['break','lunch'].includes(slot.slot_type || slot.block_type)) ? 'bg-yellow-50' : ''">
+              <tr v-for="slot in timeSlots" :key="`${slot.id || slot.start_time}`"
+                :class="isBreakSlot(slot) ? 'bg-yellow-50' : ''">
                 <td class="border border-gray-200 p-2 text-xs font-medium text-gray-600 whitespace-nowrap">
                   <div>{{ slot.start_time }} – {{ slot.end_time }}</div>
                   <div v-if="slot.label" class="text-gray-400 text-xs mt-0.5">{{ slot.label }}</div>
-                  <span v-if="slot.is_break || (slot.slot_type || slot.block_type) === 'break'" class="block text-orange-600 font-semibold">BREAK</span>
-                  <span v-else-if="(slot.slot_type || slot.block_type) === 'lunch'" class="block text-green-600 font-semibold">LUNCH</span>
+                  <span v-if="isBreakSlot(slot) && (slot.slot_type || slot.block_type) === 'lunch'" class="block text-green-600 font-semibold">LUNCH</span>
+                  <span v-else-if="isBreakSlot(slot)" class="block text-orange-600 font-semibold">BREAK</span>
                 </td>
-                <td v-for="day in DAYS" :key="day" class="border border-gray-200 p-1 align-top min-w-[120px]">
+                <td
+                  v-for="day in DAYS" :key="day"
+                  class="border border-gray-200 p-1 align-top min-w-[130px] transition-colors duration-100"
+                  :class="{
+                    'bg-blue-50 ring-2 ring-inset ring-blue-400': dragOverCell === `${day}__${slot.start_time}` && !isBreakSlot(slot),
+                    'bg-gray-50 cursor-not-allowed': isBreakSlot(slot),
+                  }"
+                  @dragover="onDragOver($event, day, slot)"
+                  @dragleave="onDragLeave($event)"
+                  @drop="onDrop($event, day, slot)"
+                >
+                  <!-- Drop-zone hint (shown when dragging and cell is empty) -->
+                  <div
+                    v-if="draggingEntry && !isBreakSlot(slot) && !(timetableGrid[`${day}__${slot.start_time}`]?.length)"
+                    class="h-12 rounded border-2 border-dashed border-blue-200 flex items-center justify-center text-xs text-blue-300 pointer-events-none select-none"
+                  >
+                    drop here
+                  </div>
+
                   <div
                     v-for="entry in (timetableGrid[`${day}__${slot.start_time}`] || [])"
                     :key="entry.id"
-                    :class="['timetable-entry cursor-pointer relative group', getEntryColor(entry.course?.id),
-                      entry.is_locked ? 'ring-1 ring-gray-300 opacity-80' : '']"
-                    @click="openSession(entry)"
+                    :draggable="!entry.is_locked && (auth.isAdmin || auth.isTimetableOfficer)"
+                    :class="[
+                      'timetable-entry relative group transition-opacity',
+                      getEntryColor(entry.course?.id),
+                      entry.is_locked ? 'ring-1 ring-gray-300 opacity-80 cursor-not-allowed' : 'cursor-grab active:cursor-grabbing',
+                      draggingEntry?.id === entry.id ? 'opacity-30 scale-95' : 'opacity-100',
+                    ]"
+                    @click="!draggingEntry && openSession(entry)"
+                    @dragstart="onDragStart($event, entry)"
+                    @dragend="onDragEnd"
                   >
                     <div class="flex items-start justify-between gap-1">
                       <p class="font-bold truncate text-xs">{{ entry.course?.code }}</p>
-                      <button v-if="entry.is_locked" class="text-white opacity-70 flex-shrink-0" title="Locked"
-                        @click.stop="toggleLock(entry)">🔒</button>
-                      <button v-else class="text-white opacity-0 group-hover:opacity-60 flex-shrink-0" title="Lock"
-                        @click.stop="toggleLock(entry)">🔓</button>
+                      <div class="flex gap-0.5 flex-shrink-0">
+                        <span v-if="entry.is_locked" class="text-white opacity-70" title="Locked">🔒</span>
+                        <button v-else class="text-white opacity-0 group-hover:opacity-60" title="Lock"
+                          @click.stop="toggleLock(entry)">🔓</button>
+                      </div>
                     </div>
                     <p class="truncate opacity-90 text-xs">{{ entry.course?.name }}</p>
                     <p class="opacity-75 truncate text-xs">{{ entry.room?.code }}</p>
                     <p class="opacity-75 truncate text-xs">{{ entry.lecturer?.name?.split(" ")[0] }}</p>
-                    <span v-if="entry.student_group" class="text-xs opacity-60 truncate">{{ entry.student_group.code }}</span>
+                    <span v-if="entry.student_group" class="text-xs opacity-60 truncate block">{{ entry.student_group.code }}</span>
                   </div>
                 </td>
               </tr>
@@ -812,5 +989,136 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
         </div>
       </div>
     </Teleport>
+
+    <!-- ── Move Confirmation Modal ──────────────────────────────────────────── -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div v-if="moveModal.visible"
+          class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          @click.self="!moveModal.moving && (moveModal.visible = false)"
+        >
+          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+
+            <!-- Header -->
+            <div :class="['p-5 text-white', moveModal.conflicts.length ? 'bg-gradient-to-r from-orange-500 to-red-500' : 'bg-gradient-to-r from-blue-600 to-indigo-600']">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <p class="text-xs opacity-80 uppercase tracking-widest font-semibold mb-1">
+                    {{ moveModal.conflicts.length ? '⚠ Conflicts Detected' : '✦ Move Session' }}
+                  </p>
+                  <h2 class="text-lg font-bold leading-tight">
+                    {{ moveModal.entry?.course?.code }} — {{ moveModal.entry?.course?.name }}
+                  </h2>
+                </div>
+                <button @click="moveModal.visible = false" :disabled="moveModal.moving"
+                  class="text-white/70 hover:text-white text-2xl leading-none mt-0.5">✕</button>
+              </div>
+            </div>
+
+            <div class="p-5 space-y-4">
+
+              <!-- From → To slot diagram -->
+              <div class="flex items-center gap-3 bg-gray-50 rounded-xl p-3 text-sm">
+                <div class="flex-1 text-center">
+                  <p class="text-[10px] text-gray-400 uppercase tracking-wide font-semibold mb-1">From</p>
+                  <p class="font-bold text-gray-800">{{ moveModal.fromSlot?.day }}</p>
+                  <p class="text-gray-500 text-xs">{{ moveModal.fromSlot?.start_time }} – {{ moveModal.fromSlot?.end_time }}</p>
+                </div>
+                <div class="text-gray-300 text-xl font-light">→</div>
+                <div class="flex-1 text-center">
+                  <p class="text-[10px] text-gray-400 uppercase tracking-wide font-semibold mb-1">To</p>
+                  <p class="font-bold text-gray-800">{{ moveModal.targetSlot?.day }}</p>
+                  <p class="text-gray-500 text-xs">{{ moveModal.targetSlot?.start_time }} – {{ moveModal.targetSlot?.end_time }}</p>
+                </div>
+              </div>
+
+              <!-- Session info chips -->
+              <div class="grid grid-cols-3 gap-2 text-xs">
+                <div class="bg-gray-50 rounded-lg p-2 text-center">
+                  <p class="text-gray-400 mb-0.5">Lecturer</p>
+                  <p class="font-semibold text-gray-800 truncate">{{ moveModal.entry?.lecturer?.name?.split(" ")[0] || "—" }}</p>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-2 text-center">
+                  <p class="text-gray-400 mb-0.5">Room</p>
+                  <p class="font-semibold text-gray-800">{{ moveModal.entry?.room?.code || "TBD" }}</p>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-2 text-center">
+                  <p class="text-gray-400 mb-0.5">Group</p>
+                  <p class="font-semibold text-gray-800 truncate">{{ moveModal.entry?.student_group?.code || "—" }}</p>
+                </div>
+              </div>
+
+              <!-- ── No conflicts ── -->
+              <div v-if="!moveModal.conflicts.length"
+                class="flex items-center gap-3 bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800">
+                <svg class="w-5 h-5 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <span><strong>No conflicts</strong> — this slot is free for this lecturer, room, and student group.</span>
+              </div>
+
+              <!-- ── Conflicts list ── -->
+              <div v-else class="space-y-2">
+                <p class="text-xs font-semibold text-red-600 uppercase tracking-wide">
+                  {{ moveModal.conflicts.length }} conflict{{ moveModal.conflicts.length > 1 ? 's' : '' }} at {{ moveModal.targetSlot?.day }} {{ moveModal.targetSlot?.start_time }}:
+                </p>
+                <div v-for="(c, i) in moveModal.conflicts" :key="i"
+                  class="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-3 text-sm">
+                  <span class="text-xl flex-shrink-0 mt-0.5">{{ c.icon }}</span>
+                  <div class="flex-1 min-w-0">
+                    <p class="font-semibold text-red-800 text-xs uppercase tracking-wide mb-1">{{ c.label }}</p>
+                    <p class="text-red-700 text-sm">{{ c.detail }}</p>
+                    <div class="mt-1.5 bg-white rounded-lg border border-red-100 px-2 py-1.5 text-xs text-gray-700 flex flex-wrap gap-x-3 gap-y-0.5">
+                      <span class="font-semibold text-blue-700">{{ c.conflicting.course?.code }}</span>
+                      <span>{{ c.conflicting.course?.name }}</span>
+                      <span v-if="c.conflicting.lecturer?.name" class="text-gray-500">· {{ c.conflicting.lecturer.name }}</span>
+                      <span v-if="c.conflicting.room?.code" class="text-gray-500">· {{ c.conflicting.room.code }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 flex items-start gap-2">
+                  <svg class="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                  </svg>
+                  <span>You can still force the placement, but these conflicts will remain and may affect the timetable's validity. Consider resolving them first.</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="px-5 pb-5 flex items-center justify-end gap-3">
+              <button class="btn-secondary text-sm" :disabled="moveModal.moving"
+                @click="moveModal.visible = false">
+                Cancel
+              </button>
+              <button
+                :class="['text-sm font-medium px-4 py-2 rounded-lg transition-colors text-white',
+                  moveModal.conflicts.length
+                    ? 'bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300'
+                    : 'bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300']"
+                :disabled="moveModal.moving"
+                @click="confirmMove"
+              >
+                <span v-if="moveModal.moving" class="flex items-center gap-2">
+                  <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                  </svg>
+                  Moving…
+                </span>
+                <span v-else-if="moveModal.conflicts.length">⚠ Place Anyway</span>
+                <span v-else>✓ Confirm Placement</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
+
+<style scoped>
+.modal-fade-enter-active, .modal-fade-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; transform: scale(0.97); }
+</style>
