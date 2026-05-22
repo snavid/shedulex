@@ -6,7 +6,7 @@ from flask import request, current_app
 from flask_jwt_extended import decode_token
 from app.extensions import db
 from app.models.user import User, Role, UserSession
-from app.services.token_service import generate_tokens, blacklist_token
+from app.services.token_service import generate_tokens, blacklist_token, blacklist_all_user_tokens
 from app.services.email_service import (
     send_verification_email,
     send_password_reset_email,
@@ -52,6 +52,7 @@ def register_user(data: dict) -> tuple[User, dict]:
         phone=data.get("phone"),
         department=data.get("department"),
         staff_id=data.get("staff_id"),
+        university_id=data.get("university_id"),
         role_id=role.id,
         verification_token=verification_token,
     )
@@ -64,7 +65,11 @@ def register_user(data: dict) -> tuple[User, dict]:
     except Exception:
         current_app.logger.warning("Verification email failed to send.")
 
-    tokens = generate_tokens(user.id, {"role": role.name, "email": user.email})
+    tokens = generate_tokens(user.id, {
+        "role": role.name,
+        "email": user.email,
+        "university_id": str(user.university_id) if user.university_id else None,
+    })
     _persist_session(user.id, tokens["access_token"])
     return user, tokens
 
@@ -83,6 +88,7 @@ def login_user(email: str, password: str) -> tuple[User, dict]:
         "role": user.role.name,
         "email": user.email,
         "must_change_password": user.must_change_password,
+        "university_id": str(user.university_id) if user.university_id else None,
     }
     tokens = generate_tokens(user.id, extra_claims)
     _persist_session(user.id, tokens["access_token"])
@@ -128,6 +134,7 @@ def reset_password(token: str, new_password: str) -> User:
     user.reset_token = None
     user.reset_token_expires = None
     db.session.commit()
+    blacklist_all_user_tokens(str(user.id))
     return user
 
 
@@ -137,6 +144,7 @@ def change_password(user: User, current_password: str, new_password: str):
     user.set_password(new_password)
     user.must_change_password = False
     db.session.commit()
+    blacklist_all_user_tokens(str(user.id))
 
 
 def _generate_password(length: int = 12) -> str:

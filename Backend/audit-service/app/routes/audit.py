@@ -1,3 +1,4 @@
+import os
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt
 from app.extensions import db
@@ -5,10 +6,14 @@ from app.models.audit_log import AuditLog
 
 audit_bp = Blueprint("audit", __name__, url_prefix="/api/v1/audit")
 
+_INTERNAL_KEY = os.environ.get("INTERNAL_SERVICE_KEY", "")
+
 
 @audit_bp.post("/log")
 def create_log():
-    """Internal endpoint — called by other services to log events (no JWT required)."""
+    """Internal endpoint — called by other services to log events."""
+    if _INTERNAL_KEY and request.headers.get("X-Internal-Key", "") != _INTERNAL_KEY:
+        return jsonify({"success": False, "message": "Unauthorized."}), 401
     body = request.get_json() or {}
     log = AuditLog(
         user_id=body.get("user_id"),

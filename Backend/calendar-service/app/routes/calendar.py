@@ -87,6 +87,9 @@ def create_event():
 @calendar_bp.put("/events/<event_id>")
 @jwt_required()
 def update_event(event_id):
+    claims = get_jwt()
+    if claims.get("role") not in WRITE_ROLES:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
     evt = AcademicEvent.query.get_or_404(event_id)
     body = request.get_json() or {}
     for k in ("title", "description", "event_type", "location", "color",
@@ -104,6 +107,9 @@ def update_event(event_id):
 @calendar_bp.patch("/events/<event_id>/cancel")
 @jwt_required()
 def cancel_event(event_id):
+    claims = get_jwt()
+    if claims.get("role") not in WRITE_ROLES:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
     evt = AcademicEvent.query.get_or_404(event_id)
     body = request.get_json() or {}
     evt.is_cancelled = True
@@ -116,6 +122,9 @@ def cancel_event(event_id):
 @calendar_bp.patch("/events/<event_id>/uncancel")
 @jwt_required()
 def uncancel_event(event_id):
+    claims = get_jwt()
+    if claims.get("role") not in WRITE_ROLES:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
     evt = AcademicEvent.query.get_or_404(event_id)
     evt.is_cancelled = False
     evt.cancelled_by = None
@@ -127,6 +136,9 @@ def uncancel_event(event_id):
 @calendar_bp.delete("/events/<event_id>")
 @jwt_required()
 def delete_event(event_id):
+    claims = get_jwt()
+    if claims.get("role") not in WRITE_ROLES:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
     evt = AcademicEvent.query.get_or_404(event_id)
     db.session.delete(evt)
     db.session.commit()

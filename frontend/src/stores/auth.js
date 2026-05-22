@@ -1,6 +1,7 @@
 import { defineStore } from "pinia"
 import { ref, computed } from "vue"
 import { authApi } from "@/api/client"
+import { useTimetableStore } from "@/stores/timetable"
 
 export const useAuthStore = defineStore("auth", () => {
   const user = ref(null)
@@ -41,6 +42,7 @@ export const useAuthStore = defineStore("auth", () => {
     refreshToken.value = null
     localStorage.removeItem("access_token")
     localStorage.removeItem("refresh_token")
+    try { useTimetableStore().clearAll() } catch {}
   }
 
   async function fetchMe() {

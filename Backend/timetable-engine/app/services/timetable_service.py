@@ -3,6 +3,7 @@ Timetable service — converts DB data to GA input, runs the algorithm,
 then persists results back to the database.
 """
 from __future__ import annotations
+import os
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.extensions import db
@@ -113,11 +114,14 @@ def generate_timetable(
         for l in lecturers
     }
 
+    ga_timeout = int(os.environ.get("GA_TIMEOUT_SECONDS", "0"))
+    ga_min_fitness = float(os.environ.get("GA_MIN_FITNESS", "0"))
     cfg_params = {
         "population_size": 100,
         "max_generations": 300,
         "elite_count": 5,
         "fitness_threshold": 0.95,
+        "max_seconds": ga_timeout,
     }
     if config_overrides:
         cfg_params.update({k: v for k, v in config_overrides.items() if k in cfg_params})
@@ -135,7 +139,7 @@ def generate_timetable(
         created_by=created_by,
     )
     db.session.add(timetable)
-    db.session.commit()
+    db.session.flush()  # assign primary key without committing
 
     try:
         result = run_ga(
@@ -147,9 +151,15 @@ def generate_timetable(
             db_constraints=db_constraints_data,
         )
     except Exception as exc:
-        timetable.status = "failed"
-        db.session.commit()
+        db.session.rollback()
         raise RuntimeError(f"GA failed: {exc}") from exc
+
+    if ga_min_fitness > 0 and result.best_fitness < ga_min_fitness:
+        db.session.rollback()
+        raise RuntimeError(
+            f"GA produced an infeasible timetable (fitness {result.best_fitness:.2f} < "
+            f"required {ga_min_fitness:.2f}). Add more rooms or reduce course load."
+        )
 
     lecturer_by_course = {c.id: c.lecturer_id for c in courses}
     group_by_course = {c.id: _resolve_student_group(c) for c in courses}
@@ -170,7 +180,11 @@ def generate_timetable(
     timetable.generation_time_seconds = result.elapsed_seconds
     timetable.generations_run = result.generations_run
     timetable.violation_report = result.violations
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        raise RuntimeError(f"Failed to save timetable results: {exc}") from exc
 
     return timetable
 
@@ -275,6 +289,14 @@ def move_entry_to_slot(entry_id: str, time_slot_id: str) -> TimetableEntry:
             raise ValueError("Room is already booked in the target time slot.")
         if o.student_group_id and o.student_group_id == entry.student_group_id:
             raise ValueError("Student group already has a class in the target time slot.")
+
+    # Lecturer availability check for the target slot
+    if entry.lecturer_id:
+        lec = Lecturer.query.get(entry.lecturer_id)
+        if lec and time_slot_id in (lec.unavailable_slots or []):
+            raise ValueError(
+                f"Lecturer '{lec.name}' has marked this time slot as unavailable."
+            )
 
     entry.time_slot_id = time_slot_id
     timetable = Timetable.query.get(timetable_id)

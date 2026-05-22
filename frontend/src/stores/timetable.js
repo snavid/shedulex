@@ -73,10 +73,23 @@ export const useTimetableStore = defineStore("timetable", () => {
     return data.data
   }
 
+  function clearAll() {
+    timetables.value = []
+    currentTimetable.value = null
+    departments.value = []
+    rooms.value = []
+    lecturers.value = []
+    courses.value = []
+    constraints.value = []
+    conflicts.value = []
+    isGenerating.value = false
+  }
+
   return {
     timetables, currentTimetable, departments, rooms, lecturers,
     courses, constraints, conflicts, isGenerating,
     fetchTimetables, fetchTimetable, generateTimetable, detectConflicts,
     swapEntries, fetchDepartments, fetchRooms, fetchLecturers, fetchCourses,
+    clearAll,
   }
 })

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, watch } from "vue"
+import { ref, onMounted, onBeforeUnmount, computed, watch } from "vue"
 import { useRouter } from "vue-router"
 import { useTimetableStore } from "@/stores/timetable"
 import { resourcesApi, calendarApi, timetableApi, getErrorMessage } from "@/api/client"
@@ -61,6 +61,8 @@ watch(() => form.value.calendar_semester_id, (id) => {
   }
 })
 watch(() => form.value.department_id, () => { form.value.program_id = "" })
+
+onBeforeUnmount(() => stopProgressAnimation(false))
 
 onMounted(async () => {
   await store.fetchDepartments()

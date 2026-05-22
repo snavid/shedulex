@@ -42,6 +42,7 @@ class GAConfig:
     fitness_threshold: float = 0.95
     tournament_size: int = 5
     stagnation_limit: int = 50
+    max_seconds: int = 0
 
 
 @dataclass
@@ -132,6 +133,10 @@ def run_ga(
     )
 
     for generation in range(1, cfg.max_generations + 1):
+        if cfg.max_seconds > 0 and (time.perf_counter() - start) >= cfg.max_seconds:
+            logger.info("GA timed out at generation %d (%.1fs limit reached)", generation, cfg.max_seconds)
+            break
+
         # Step 3 – Elitism
         new_population = elitism(population, cfg.elite_count)
 

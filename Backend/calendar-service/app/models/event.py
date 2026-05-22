@@ -5,6 +5,10 @@ from app.extensions import db
 
 class AcademicEvent(db.Model):
     __tablename__ = "academic_events"
+    __table_args__ = (
+        db.Index("ix_academic_events_university_id", "university_id"),
+        db.Index("ix_academic_events_start_datetime", "start_datetime"),
+    )
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     title = db.Column(db.String(200), nullable=False)
@@ -61,6 +65,10 @@ class AcademicSemester(db.Model):
     Drives timetable generation, event scheduling, and reminder systems.
     """
     __tablename__ = "academic_semesters"
+    __table_args__ = (
+        db.Index("ix_academic_semesters_university_id_is_current", "university_id", "is_current"),
+        db.Index("ix_academic_semesters_date_range", "start_date", "end_date"),
+    )
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = db.Column(db.String(100), nullable=False)

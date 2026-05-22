@@ -333,6 +333,10 @@ class TimeSlot(db.Model):
 
 class Timetable(db.Model):
     __tablename__ = "timetables"
+    __table_args__ = (
+        db.Index("ix_timetables_department_id_status", "department_id", "status"),
+        db.Index("ix_timetables_calendar_semester_id", "calendar_semester_id"),
+    )
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = db.Column(db.String(200), nullable=False)
@@ -382,6 +386,12 @@ class Timetable(db.Model):
 
 class TimetableEntry(db.Model):
     __tablename__ = "timetable_entries"
+    __table_args__ = (
+        db.Index("ix_timetable_entries_timetable_id", "timetable_id"),
+        db.Index("ix_timetable_entries_lecturer_id", "lecturer_id"),
+        db.Index("ix_timetable_entries_room_id", "room_id"),
+        db.Index("ix_timetable_entries_time_slot_id", "time_slot_id"),
+    )
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     timetable_id = db.Column(db.String(36), db.ForeignKey("timetables.id"), nullable=False)
