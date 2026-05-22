@@ -240,7 +240,7 @@ def get_semester(sem_id):
 @jwt_required()
 def create_semester():
     claims = get_jwt()
-    if claims.get("role") not in ADMIN_ROLES:
+    if claims.get("role") not in WRITE_ROLES:
         return jsonify({"success": False, "message": "Forbidden."}), 403
     body = request.get_json() or {}
 
@@ -264,11 +264,12 @@ def create_semester():
         timezone=body.get("timezone", "UTC"),
         is_current=body.get("is_current", False),
     )
-    if sem.is_current and sem.university_id:
-        # Unset previous current for this university
-        AcademicSemester.query.filter_by(
-            university_id=sem.university_id, is_current=True
-        ).update({"is_current": False})
+    if sem.is_current:
+        # Unset every other current semester (works for both single- and multi-tenant)
+        q_clear = AcademicSemester.query.filter_by(is_current=True)
+        if sem.university_id:
+            q_clear = q_clear.filter_by(university_id=sem.university_id)
+        q_clear.update({"is_current": False})
 
     db.session.add(sem)
     db.session.commit()
@@ -279,14 +280,10 @@ def create_semester():
 @jwt_required()
 def update_semester(sem_id):
     claims = get_jwt()
-    if claims.get("role") not in ADMIN_ROLES:
+    if claims.get("role") not in WRITE_ROLES:
         return jsonify({"success": False, "message": "Forbidden."}), 403
     sem = AcademicSemester.query.get_or_404(sem_id)
     body = request.get_json() or {}
-
-    def _parse_date(key):
-        val = body.get(key)
-        return date.fromisoformat(val) if val else getattr(sem, key)
 
     for k in ("name", "academic_year", "timezone"):
         if k in body:
@@ -303,14 +300,18 @@ def update_semester(sem_id):
             val = body[date_field]
             setattr(sem, date_field, date.fromisoformat(val) if val else None)
 
-    if "is_current" in body and body["is_current"] and sem.university_id:
-        AcademicSemester.query.filter(
-            AcademicSemester.university_id == sem.university_id,
-            AcademicSemester.id != sem.id,
-        ).update({"is_current": False})
-        sem.is_current = True
-    elif "is_current" in body:
-        sem.is_current = body["is_current"]
+    if "is_current" in body:
+        if body["is_current"]:
+            # Clear every other current semester (single- and multi-tenant safe)
+            q_clear = AcademicSemester.query.filter(
+                AcademicSemester.id != sem.id, AcademicSemester.is_current == True
+            )
+            if sem.university_id:
+                q_clear = q_clear.filter_by(university_id=sem.university_id)
+            q_clear.update({"is_current": False})
+            sem.is_current = True
+        else:
+            sem.is_current = False
 
     db.session.commit()
     return jsonify({"success": True, "data": sem.to_dict()}), 200
@@ -320,14 +321,15 @@ def update_semester(sem_id):
 @jwt_required()
 def set_current_semester(sem_id):
     claims = get_jwt()
-    if claims.get("role") not in ADMIN_ROLES:
+    if claims.get("role") not in WRITE_ROLES:
         return jsonify({"success": False, "message": "Forbidden."}), 403
     sem = AcademicSemester.query.get_or_404(sem_id)
+    q_clear = AcademicSemester.query.filter(
+        AcademicSemester.id != sem.id, AcademicSemester.is_current == True
+    )
     if sem.university_id:
-        AcademicSemester.query.filter(
-            AcademicSemester.university_id == sem.university_id,
-            AcademicSemester.id != sem.id,
-        ).update({"is_current": False})
+        q_clear = q_clear.filter_by(university_id=sem.university_id)
+    q_clear.update({"is_current": False})
     sem.is_current = True
     db.session.commit()
     return jsonify({"success": True, "data": sem.to_dict()}), 200
@@ -337,7 +339,7 @@ def set_current_semester(sem_id):
 @jwt_required()
 def delete_semester(sem_id):
     claims = get_jwt()
-    if claims.get("role") not in ADMIN_ROLES:
+    if claims.get("role") not in WRITE_ROLES:
         return jsonify({"success": False, "message": "Forbidden."}), 403
     sem = AcademicSemester.query.get_or_404(sem_id)
     db.session.delete(sem)
