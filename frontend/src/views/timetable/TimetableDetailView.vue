@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue"
 import { useRoute } from "vue-router"
 import { useToast } from "vue-toastification"
 
-import { documentApi, getErrorMessage, notificationApi, timetableApi } from "@/api/client"
+import { documentApi, getErrorMessage, notificationApi, resourcesApi, timetableApi } from "@/api/client"
 import { useTimetableStore } from "@/stores/timetable"
 import { useAuthStore } from "@/stores/auth"
 
@@ -43,6 +43,7 @@ const reminderForm = ref({ hours_before: 2, channel: "both", scheduled_at: "" })
 const sendingReminder = ref(false)
 
 const exportOps = ref({ pdf: false, excel: false, csv: false, bundle: false, share: false })
+const templateBlocks = ref([])
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
@@ -105,21 +106,32 @@ const timetableGrid = computed(() => {
   return grid
 })
 
-// Slots for week/day view (deduplicated by start_time + slot_index)
+// Slots for week/day view — rows represent unique time periods.
+// Prefer template blocks so breaks/lunch show even when no entries exist.
+// Fall back to entry-derived slots when no template is linked.
 const timeSlots = computed(() => {
+  if (templateBlocks.value.length) {
+    const seen = new Set()
+    const rows = []
+    const sorted = [...templateBlocks.value].sort(
+      (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.start_time.localeCompare(b.start_time)
+    )
+    for (const b of sorted) {
+      const key = `${b.start_time}__${b.end_time}`
+      if (!seen.has(key)) { seen.add(key); rows.push(b) }
+    }
+    return rows
+  }
   if (!store.currentTimetable?.entries) return []
   const seen = new Set()
   const slots = []
   for (const entry of store.currentTimetable.entries) {
     const slot = entry.time_slot
     if (!slot) continue
-    const key = `${slot.start_time}__${slot.slot_index}`
-    if (!seen.has(key)) {
-      seen.add(key)
-      slots.push(slot)
-    }
+    const key = `${slot.start_time}__${slot.end_time}`
+    if (!seen.has(key)) { seen.add(key); slots.push(slot) }
   }
-  return slots.sort((a, b) => (a.slot_index || 0) - (b.slot_index || 0))
+  return slots.sort((a, b) => a.start_time.localeCompare(b.start_time))
 })
 
 // Day-view: entries for selectedDay
@@ -367,9 +379,20 @@ async function loadTimetablePage(id) {
   if (!id) return
   loading.value = true
   pageError.value = ""
+  templateBlocks.value = []
   try {
     await store.fetchTimetable(id)
-    await Promise.all([loadExportPreview(), loadExportAnalytics(), loadVersions()])
+    const templateId = store.currentTimetable?.template_id
+    await Promise.all([
+      loadExportPreview(),
+      loadExportAnalytics(),
+      loadVersions(),
+      templateId
+        ? resourcesApi.getTemplate(templateId)
+            .then(({ data }) => { templateBlocks.value = data.data?.blocks || [] })
+            .catch(() => {})
+        : Promise.resolve(),
+    ])
   } catch (e) {
     pageError.value = getErrorMessage(e, "Failed to load timetable details.")
   } finally {
@@ -546,12 +569,12 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
             </thead>
             <tbody>
               <tr v-for="slot in timeSlots" :key="slot.id"
-                :class="(slot.is_break || ['break','lunch'].includes(slot.slot_type)) ? 'bg-yellow-50' : ''">
+                :class="(slot.is_break || ['break','lunch'].includes(slot.slot_type || slot.block_type)) ? 'bg-yellow-50' : ''">
                 <td class="border border-gray-200 p-2 text-xs font-medium text-gray-600 whitespace-nowrap">
                   <div>{{ slot.start_time }} – {{ slot.end_time }}</div>
                   <div v-if="slot.label" class="text-gray-400 text-xs mt-0.5">{{ slot.label }}</div>
-                  <span v-if="slot.is_break || slot.slot_type === 'break'" class="block text-orange-600 font-semibold">BREAK</span>
-                  <span v-else-if="slot.slot_type === 'lunch'" class="block text-green-600 font-semibold">LUNCH</span>
+                  <span v-if="slot.is_break || (slot.slot_type || slot.block_type) === 'break'" class="block text-orange-600 font-semibold">BREAK</span>
+                  <span v-else-if="(slot.slot_type || slot.block_type) === 'lunch'" class="block text-green-600 font-semibold">LUNCH</span>
                 </td>
                 <td v-for="day in DAYS" :key="day" class="border border-gray-200 p-1 align-top min-w-[120px]">
                   <div

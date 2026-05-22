@@ -496,6 +496,13 @@ def list_templates():
     return ok(data=[t.to_dict(include_blocks=True) for t in templates])
 
 
+@resources_bp.get("/templates/<template_id>")
+@service_or_jwt_required()
+def get_template(template_id):
+    template = TimetableTemplate.query.get_or_404(template_id)
+    return ok(data=template.to_dict(include_blocks=True))
+
+
 @resources_bp.post("/templates")
 @service_or_jwt_required(*WRITE_ROLES)
 def create_template():
