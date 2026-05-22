@@ -1,5 +1,8 @@
 from .domain import (
+    University,
     Department,
+    Program,
+    StudentGroup,
     Room,
     Lecturer,
     Course,
@@ -8,10 +11,16 @@ from .domain import (
     TimetableEntry,
     TimetableSnapshot,
     Constraint,
+    TimetableTemplate,
+    TemplateTimeBlock,
+    lecturer_programs,
 )
 
 __all__ = [
+    "University",
     "Department",
+    "Program",
+    "StudentGroup",
     "Room",
     "Lecturer",
     "Course",
@@ -20,4 +29,7 @@ __all__ = [
     "TimetableEntry",
     "TimetableSnapshot",
     "Constraint",
+    "TimetableTemplate",
+    "TemplateTimeBlock",
+    "lecturer_programs",
 ]

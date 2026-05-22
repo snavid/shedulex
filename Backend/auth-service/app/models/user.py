@@ -31,9 +31,11 @@ class User(db.Model):
     phone = db.Column(db.String(20))
     department = db.Column(db.String(100))
     staff_id = db.Column(db.String(50), unique=True)
+    university_id = db.Column(db.String(36))  # soft-ref to timetable-service university
     role_id = db.Column(db.String(36), db.ForeignKey("roles.id"), nullable=False)
     is_active = db.Column(db.Boolean, default=True)
     is_verified = db.Column(db.Boolean, default=False)
+    must_change_password = db.Column(db.Boolean, default=False)  # force change on first login
     verification_token = db.Column(db.String(255))
     reset_token = db.Column(db.String(255))
     reset_token_expires = db.Column(db.DateTime(timezone=True))
@@ -64,9 +66,11 @@ class User(db.Model):
             "phone": self.phone,
             "department": self.department,
             "staff_id": self.staff_id,
+            "university_id": self.university_id,
             "role": self.role.to_dict() if self.role else None,
             "is_active": self.is_active,
             "is_verified": self.is_verified,
+            "must_change_password": self.must_change_password,
             "last_login": self.last_login.isoformat() if self.last_login else None,
             "created_at": self.created_at.isoformat(),
         }

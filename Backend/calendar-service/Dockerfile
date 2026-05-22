@@ -4,5 +4,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
+RUN chmod +x entrypoint.sh
 EXPOSE 5005
-CMD ["gunicorn", "--bind", "0.0.0.0:5005", "--workers", "1", "wsgi:app"]
+CMD ["./entrypoint.sh"]

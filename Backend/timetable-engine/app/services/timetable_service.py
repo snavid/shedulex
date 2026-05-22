@@ -7,7 +7,8 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.extensions import db
 from app.models.domain import (
-    Course, Lecturer, Room, TimeSlot, Timetable, TimetableEntry, TimetableSnapshot,
+    Constraint, Course, Lecturer, Program, Room, StudentGroup,
+    TimeSlot, Timetable, TimetableEntry, TimetableSnapshot, TimetableTemplate,
 )
 from app.ga import run_ga, GAConfig
 
@@ -18,40 +19,59 @@ def generate_timetable(
     academic_year: str,
     name: str,
     created_by: str,
+    program_id: str | None = None,
+    template_id: str | None = None,
+    calendar_semester_id: str | None = None,
     config_overrides: dict | None = None,
 ) -> Timetable:
     """
     Orchestrates the full GA pipeline for a department/semester pair.
+    If program_id is given the schedule is scoped to that programme.
     Raises ValueError if there is not enough data to schedule.
     """
-    # Load domain data
-    courses = (
-        Course.query
-        .filter_by(department_id=department_id, semester=semester, is_active=True)
-        .all()
-    )
+    course_q = Course.query.filter_by(semester=semester, is_active=True)
+    if program_id:
+        course_q = course_q.filter_by(program_id=program_id)
+    else:
+        course_q = course_q.filter_by(department_id=department_id)
+    courses = course_q.all()
     if not courses:
-        raise ValueError("No active courses found for this department and semester.")
+        scope = f"program {program_id}" if program_id else f"department {department_id}"
+        raise ValueError(f"No active courses found for {scope} and semester {semester}.")
 
     lecturers = Lecturer.query.filter_by(is_active=True).all()
     rooms = Room.query.filter_by(is_available=True).all()
-    slots = TimeSlot.query.order_by(TimeSlot.slot_index).all()
+
+    # Use template-scoped slots if a template is specified
+    if template_id:
+        slots = TimeSlot.query.filter_by(template_id=template_id).order_by(TimeSlot.slot_index).all()
+        if not slots:
+            slots = TimeSlot.query.order_by(TimeSlot.slot_index).all()
+    else:
+        slots = TimeSlot.query.order_by(TimeSlot.slot_index).all()
 
     if not rooms:
         raise ValueError("No available rooms found.")
     if not slots:
         raise ValueError("No time slots configured.")
 
-    # Serialise for GA (plain dicts — keeps the GA layer decoupled from ORM)
+    # Load all active constraints from DB (scoped to department/program/global)
+    constraint_q = Constraint.query.filter_by(is_active=True)
+    db_constraints_raw = constraint_q.all()
+    db_constraints_data = [c.to_dict() for c in db_constraints_raw]
+
+    # Serialise domain objects → plain dicts for GA layer
     courses_data = [
         {
             "id": c.id,
             "name": c.name,
             "lecturer_id": c.lecturer_id,
             "student_count": c.student_count,
+            "student_group_id": _resolve_student_group(c),
             "requires_lab": c.requires_lab,
             "weekly_hours": c.weekly_hours,
             "department_id": c.department_id,
+            "program_id": c.program_id,
             "priority": c.priority,
         }
         for c in courses
@@ -61,6 +81,8 @@ def generate_timetable(
             "id": r.id,
             "capacity": r.capacity,
             "room_type": r.room_type,
+            "name": r.name,
+            "has_lab_equipment": r.has_lab_equipment,
         }
         for r in rooms
     ]
@@ -70,15 +92,27 @@ def generate_timetable(
             "day": s.day,
             "slot_index": s.slot_index,
             "is_break": s.is_break,
+            "slot_type": s.slot_type or ("break" if s.is_break else "class"),
+            "label": s.label,
+            "start_time": s.start_time,
+            "end_time": s.end_time,
         }
         for s in slots
     ]
     lecturers_dict = {
-        l.id: {"id": l.id, "name": l.name, "availability": l.availability or {}}
+        l.id: {
+            "id": l.id,
+            "name": l.name,
+            "availability": l.availability or {},
+            "max_hours_per_week": l.max_hours_per_week or 20,
+            "max_hours_per_day": l.max_hours_per_day or 6,
+            "max_consecutive_hours": l.max_consecutive_hours or 3,
+            "preferred_days": l.preferred_days or [],
+            "unavailable_slots": l.unavailable_slots or [],
+        }
         for l in lecturers
     }
 
-    # Build GA config
     cfg_params = {
         "population_size": 100,
         "max_generations": 300,
@@ -86,15 +120,17 @@ def generate_timetable(
         "fitness_threshold": 0.95,
     }
     if config_overrides:
-        cfg_params.update(config_overrides)
+        cfg_params.update({k: v for k, v in config_overrides.items() if k in cfg_params})
     ga_cfg = GAConfig(**cfg_params)
 
-    # Create a timetable record in "generating" state
     timetable = Timetable(
         name=name,
         semester=semester,
         academic_year=academic_year,
         department_id=department_id,
+        program_id=program_id,
+        template_id=template_id,
+        calendar_semester_id=calendar_semester_id,
         status="generating",
         created_by=created_by,
     )
@@ -108,22 +144,24 @@ def generate_timetable(
             slots=slots_data,
             lecturers=lecturers_dict,
             config=ga_cfg,
+            db_constraints=db_constraints_data,
         )
     except Exception as exc:
         timetable.status = "failed"
         db.session.commit()
         raise RuntimeError(f"GA failed: {exc}") from exc
 
-    lecturer_by_course_id = {c.id: c.lecturer_id for c in courses}
+    lecturer_by_course = {c.id: c.lecturer_id for c in courses}
+    group_by_course = {c.id: _resolve_student_group(c) for c in courses}
 
-    # Persist entries
     for gene in result.best_chromosome.genes:
         entry = TimetableEntry(
             timetable_id=timetable.id,
             course_id=gene.course_id,
-            lecturer_id=lecturer_by_course_id.get(gene.course_id),
+            lecturer_id=lecturer_by_course.get(gene.course_id),
             room_id=gene.room_id,
             time_slot_id=gene.time_slot_id,
+            student_group_id=group_by_course.get(gene.course_id),
         )
         db.session.add(entry)
 
@@ -131,9 +169,22 @@ def generate_timetable(
     timetable.fitness_score = result.best_fitness
     timetable.generation_time_seconds = result.elapsed_seconds
     timetable.generations_run = result.generations_run
+    timetable.violation_report = result.violations
     db.session.commit()
 
     return timetable
+
+
+def _resolve_student_group(course: Course) -> str | None:
+    """Return the first student group ID for a course's programme, if any."""
+    if course.program_id:
+        grp = (
+            StudentGroup.query
+            .filter_by(program_id=course.program_id, semester=course.semester, is_active=True)
+            .first()
+        )
+        return grp.id if grp else None
+    return None
 
 
 def get_timetable_by_id(timetable_id: str) -> Timetable | None:
@@ -141,10 +192,14 @@ def get_timetable_by_id(timetable_id: str) -> Timetable | None:
         Timetable.query
         .options(
             joinedload(Timetable.department),
+            joinedload(Timetable.program),
+            joinedload(Timetable.template),
             selectinload(Timetable.entries).joinedload(TimetableEntry.room),
             selectinload(Timetable.entries).joinedload(TimetableEntry.time_slot),
+            selectinload(Timetable.entries).joinedload(TimetableEntry.student_group),
             selectinload(Timetable.entries).joinedload(TimetableEntry.lecturer).joinedload(Lecturer.department),
             selectinload(Timetable.entries).joinedload(TimetableEntry.course).joinedload(Course.department),
+            selectinload(Timetable.entries).joinedload(TimetableEntry.course).joinedload(Course.program),
             selectinload(Timetable.entries).joinedload(TimetableEntry.course).joinedload(Course.lecturer).joinedload(Lecturer.department),
         )
         .filter_by(id=timetable_id)
@@ -152,10 +207,21 @@ def get_timetable_by_id(timetable_id: str) -> Timetable | None:
     )
 
 
-def list_timetables(department_id: str = None, semester: int = None, status: str = None):
-    q = Timetable.query.options(joinedload(Timetable.department))
+def list_timetables(
+    department_id: str = None,
+    semester: int = None,
+    status: str = None,
+    program_id: str = None,
+):
+    q = Timetable.query.options(
+        joinedload(Timetable.department),
+        joinedload(Timetable.program),
+        joinedload(Timetable.template),
+    )
     if department_id:
         q = q.filter_by(department_id=department_id)
+    if program_id:
+        q = q.filter_by(program_id=program_id)
     if semester:
         q = q.filter_by(semester=semester)
     if status:
@@ -164,7 +230,6 @@ def list_timetables(department_id: str = None, semester: int = None, status: str
 
 
 def swap_entries(entry1_id: str, entry2_id: str) -> tuple:
-    """Swap time slots of two entries (drag-and-drop)."""
     e1 = TimetableEntry.query.get(entry1_id)
     e2 = TimetableEntry.query.get(entry2_id)
     if not e1 or not e2:
@@ -180,7 +245,6 @@ def swap_entries(entry1_id: str, entry2_id: str) -> tuple:
 
 
 def move_entry_to_slot(entry_id: str, time_slot_id: str) -> TimetableEntry:
-    """Move one entry to another time slot without swapping (target slot must be free for room/lecturer)."""
     entry = TimetableEntry.query.get(entry_id)
     if not entry:
         raise ValueError("Entry not found.")
@@ -190,6 +254,8 @@ def move_entry_to_slot(entry_id: str, time_slot_id: str) -> TimetableEntry:
     slot = TimeSlot.query.get(time_slot_id)
     if not slot:
         raise ValueError("Time slot not found.")
+    if slot.slot_type in ("break", "lunch") or slot.is_break:
+        raise ValueError("Cannot move a class into a break or lunch slot.")
 
     if entry.time_slot_id == time_slot_id:
         return entry
@@ -200,7 +266,6 @@ def move_entry_to_slot(entry_id: str, time_slot_id: str) -> TimetableEntry:
         .filter(TimetableEntry.id != entry.id)
         .all()
     )
-
     for o in others:
         if o.time_slot_id != time_slot_id:
             continue
@@ -208,6 +273,8 @@ def move_entry_to_slot(entry_id: str, time_slot_id: str) -> TimetableEntry:
             raise ValueError("Lecturer is already scheduled in the target time slot.")
         if o.room_id == entry.room_id:
             raise ValueError("Room is already booked in the target time slot.")
+        if o.student_group_id and o.student_group_id == entry.student_group_id:
+            raise ValueError("Student group already has a class in the target time slot.")
 
     entry.time_slot_id = time_slot_id
     timetable = Timetable.query.get(timetable_id)
@@ -218,38 +285,87 @@ def move_entry_to_slot(entry_id: str, time_slot_id: str) -> TimetableEntry:
 
 
 def detect_conflicts(timetable_id: str) -> list[dict]:
-    """Return a list of conflict descriptions for a given timetable."""
-    entries = TimetableEntry.query.filter_by(timetable_id=timetable_id).all()
+    entries = (
+        TimetableEntry.query
+        .options(
+            joinedload(TimetableEntry.time_slot),
+            joinedload(TimetableEntry.course),
+            joinedload(TimetableEntry.lecturer),
+            joinedload(TimetableEntry.room),
+            joinedload(TimetableEntry.student_group),
+        )
+        .filter_by(timetable_id=timetable_id)
+        .all()
+    )
     conflicts = []
-
-    seen_lecturer_slot: dict = {}
-    seen_room_slot: dict = {}
+    seen_lec: dict = {}
+    seen_room: dict = {}
+    seen_grp: dict = {}
 
     for e in entries:
-        lec_key = f"{e.lecturer_id}:{e.time_slot_id}"
-        room_key = f"{e.room_id}:{e.time_slot_id}"
+        slot_label = (
+            f"{e.time_slot.day} {e.time_slot.start_time}"
+            if e.time_slot else e.time_slot_id
+        )
 
-        if lec_key in seen_lecturer_slot:
-            conflicts.append({
-                "type": "lecturer_clash",
-                "message": f"Lecturer double-booked at slot {e.time_slot_id}",
-                "entry1": seen_lecturer_slot[lec_key],
-                "entry2": e.id,
-            })
-        else:
-            seen_lecturer_slot[lec_key] = e.id
+        if e.lecturer_id:
+            key = f"{e.lecturer_id}:{e.time_slot_id}"
+            if key in seen_lec:
+                conflicts.append({
+                    "type": "lecturer_clash",
+                    "severity": "high",
+                    "rule": "H1 — Lecturer double-booked",
+                    "message": f"Lecturer '{e.lecturer.name if e.lecturer else e.lecturer_id}' double-booked at {slot_label}",
+                    "entry1": seen_lec[key], "entry2": e.id,
+                })
+            else:
+                seen_lec[key] = e.id
 
-        if room_key in seen_room_slot:
+        if e.room_id:
+            key = f"{e.room_id}:{e.time_slot_id}"
+            if key in seen_room:
+                conflicts.append({
+                    "type": "room_clash",
+                    "severity": "high",
+                    "rule": "H2 — Room double-booked",
+                    "message": f"Room '{e.room.code if e.room else e.room_id}' double-booked at {slot_label}",
+                    "entry1": seen_room[key], "entry2": e.id,
+                })
+            else:
+                seen_room[key] = e.id
+
+        if e.student_group_id:
+            key = f"{e.student_group_id}:{e.time_slot_id}"
+            if key in seen_grp:
+                conflicts.append({
+                    "type": "student_group_clash",
+                    "severity": "high",
+                    "rule": "H7 — Student group double-booked",
+                    "message": f"Student group '{e.student_group.name if e.student_group else e.student_group_id}' has two classes at {slot_label}",
+                    "entry1": seen_grp[key], "entry2": e.id,
+                })
+            else:
+                seen_grp[key] = e.id
+
+        # Extra: class in break slot
+        if e.time_slot and (e.time_slot.is_break or e.time_slot.slot_type in ("break", "lunch")):
             conflicts.append({
-                "type": "room_clash",
-                "message": f"Room double-booked at slot {e.time_slot_id}",
-                "entry1": seen_room_slot[room_key],
-                "entry2": e.id,
+                "type": "break_slot_violation",
+                "severity": "high",
+                "rule": "H6 — Class in break/lunch slot",
+                "message": f"{e.course.name if e.course else 'Unknown'} scheduled in a break period at {slot_label}",
+                "entry1": e.id, "entry2": None,
             })
-        else:
-            seen_room_slot[room_key] = e.id
 
     return conflicts
+
+
+def get_violation_report(timetable_id: str) -> list[dict]:
+    """Return the stored violation report from last GA run."""
+    tt = Timetable.query.get(timetable_id)
+    if not tt:
+        return []
+    return tt.violation_report or []
 
 
 def list_entries(timetable_id: str | None = None, day: str | None = None):
@@ -258,6 +374,7 @@ def list_entries(timetable_id: str | None = None, day: str | None = None):
         .options(
             joinedload(TimetableEntry.room),
             joinedload(TimetableEntry.time_slot),
+            joinedload(TimetableEntry.student_group),
             joinedload(TimetableEntry.lecturer).joinedload(Lecturer.department),
             joinedload(TimetableEntry.course).joinedload(Course.department),
             joinedload(TimetableEntry.course).joinedload(Course.lecturer).joinedload(Lecturer.department),
@@ -274,10 +391,6 @@ def list_entries(timetable_id: str | None = None, day: str | None = None):
 
 
 def predict_conflicts(timetable_id: str) -> list[dict]:
-    """
-    Predict likely pressure points even if current entries are technically conflict-free.
-    This is useful for proactive adjustments before publishing a timetable.
-    """
     timetable = Timetable.query.get(timetable_id)
     if not timetable:
         return []
@@ -295,70 +408,59 @@ def predict_conflicts(timetable_id: str) -> list[dict]:
     )
     predictions: list[dict] = []
 
-    # 1) Room capacity pressure
+    # Room capacity pressure
     for entry in entries:
-        course = entry.course
-        room = entry.room
-        if not course or not room:
-            continue
-        if course.student_count > room.capacity:
-            overflow = course.student_count - room.capacity
-            predictions.append({
-                "type": "capacity_risk",
-                "severity": "high",
-                "entry_id": entry.id,
-                "message": f"{course.code} exceeds room capacity by {overflow} students.",
-            })
+        if entry.course and entry.room:
+            overflow = entry.course.student_count - entry.room.capacity
+            if overflow > 0:
+                predictions.append({
+                    "type": "capacity_risk", "severity": "high",
+                    "entry_id": entry.id,
+                    "message": f"{entry.course.code} exceeds room capacity by {overflow} students.",
+                })
 
-    # 2) Consecutive lecturer overload (4+ consecutive slots/day)
-    by_lecturer_day: dict[tuple[str, str], list[int]] = {}
-    lecturer_names = {
+    # Consecutive lecturer overload
+    from collections import defaultdict
+    by_lec_day: dict[tuple, list] = defaultdict(list)
+    lec_names = {
         e.lecturer_id: e.lecturer.name
-        for e in entries
-        if e.lecturer_id and e.lecturer is not None
+        for e in entries if e.lecturer_id and e.lecturer
     }
     for entry in entries:
-        if not entry.lecturer_id or not entry.time_slot:
-            continue
-        key = (entry.lecturer_id, entry.time_slot.day)
-        by_lecturer_day.setdefault(key, []).append(entry.time_slot.slot_index or 0)
+        if entry.lecturer_id and entry.time_slot:
+            by_lec_day[(entry.lecturer_id, entry.time_slot.day)].append(
+                entry.time_slot.slot_index or 0
+            )
 
-    for (lecturer_id, day), slot_indexes in by_lecturer_day.items():
-        sorted_indexes = sorted(slot_indexes)
-        streak = 1
-        max_streak = 1
-        for idx in range(1, len(sorted_indexes)):
-            if sorted_indexes[idx] == sorted_indexes[idx - 1] + 1:
+    for (lec_id, day), idxs in by_lec_day.items():
+        sorted_idxs = sorted(idxs)
+        streak = max_streak = 1
+        for i in range(1, len(sorted_idxs)):
+            if sorted_idxs[i] == sorted_idxs[i - 1] + 1:
                 streak += 1
                 max_streak = max(max_streak, streak)
             else:
                 streak = 1
         if max_streak >= 4:
-            lecturer_name = lecturer_names.get(lecturer_id, lecturer_id)
             predictions.append({
-                "type": "lecturer_workload_risk",
-                "severity": "medium",
-                "lecturer_id": lecturer_id,
-                "message": f"{lecturer_name} has {max_streak} consecutive periods on {day}.",
+                "type": "lecturer_workload_risk", "severity": "medium",
+                "lecturer_id": lec_id,
+                "message": f"{lec_names.get(lec_id, lec_id)} has {max_streak} consecutive periods on {day}.",
             })
 
-    # 3) Peak-hour density by day/slot
+    # Peak-hour density
     occupancy: dict[str, int] = {}
     for entry in entries:
-        slot = entry.time_slot
-        if not slot:
-            continue
-        key = f"{slot.day} {slot.start_time}"
-        occupancy[key] = occupancy.get(key, 0) + 1
-
+        if entry.time_slot:
+            key = f"{entry.time_slot.day} {entry.time_slot.start_time}"
+            occupancy[key] = occupancy.get(key, 0) + 1
     if occupancy:
-        max_occupancy = max(occupancy.values())
+        max_occ = max(occupancy.values())
         for key, count in occupancy.items():
-            if max_occupancy >= 4 and count == max_occupancy:
+            if max_occ >= 4 and count == max_occ:
                 predictions.append({
-                    "type": "peak_hour_risk",
-                    "severity": "low",
-                    "message": f"Peak congestion at {key} ({count} classes running in parallel).",
+                    "type": "peak_hour_risk", "severity": "low",
+                    "message": f"Peak congestion at {key} ({count} classes in parallel).",
                 })
 
     return predictions
@@ -369,16 +471,18 @@ def create_snapshot(timetable_id: str, created_by: str | None, notes: str = "") 
     if not timetable:
         raise ValueError("Timetable not found.")
 
-    snapshot_data = []
-    for entry in timetable.entries:
-        snapshot_data.append({
-            "course_id": entry.course_id,
-            "lecturer_id": entry.lecturer_id,
-            "room_id": entry.room_id,
-            "time_slot_id": entry.time_slot_id,
-            "is_locked": entry.is_locked,
-            "notes": entry.notes,
-        })
+    snapshot_data = [
+        {
+            "course_id": e.course_id,
+            "lecturer_id": e.lecturer_id,
+            "room_id": e.room_id,
+            "time_slot_id": e.time_slot_id,
+            "student_group_id": e.student_group_id,
+            "is_locked": e.is_locked,
+            "notes": e.notes,
+        }
+        for e in timetable.entries
+    ]
 
     snapshot = TimetableSnapshot(
         timetable_id=timetable.id,
@@ -405,51 +509,58 @@ def restore_snapshot(snapshot_id: str) -> Timetable:
     snapshot = TimetableSnapshot.query.get(snapshot_id)
     if not snapshot:
         raise ValueError("Snapshot not found.")
-
     timetable = Timetable.query.get(snapshot.timetable_id)
     if not timetable:
         raise ValueError("Timetable not found.")
 
     TimetableEntry.query.filter_by(timetable_id=timetable.id).delete(synchronize_session=False)
     for row in snapshot.snapshot_data or []:
-        restored = TimetableEntry(
+        db.session.add(TimetableEntry(
             timetable_id=timetable.id,
             course_id=row["course_id"],
             lecturer_id=row["lecturer_id"],
             room_id=row["room_id"],
             time_slot_id=row["time_slot_id"],
+            student_group_id=row.get("student_group_id"),
             is_locked=row.get("is_locked", False),
             notes=row.get("notes"),
-        )
-        db.session.add(restored)
+        ))
 
     timetable.version = (timetable.version or 1) + 1
     db.session.commit()
     return timetable
 
 
-def seed_default_slots():
-    """Create a standard Mon–Fri timetable grid if none exists."""
+def seed_default_slots(template_id: str | None = None):
+    """Create a standard Mon–Fri timetable grid using structured slot_types."""
     if TimeSlot.query.count() > 0:
         return
 
     days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
-    periods = [
-        ("08:00", "09:00"), ("09:00", "10:00"), ("10:00", "11:00"),
-        ("11:00", "12:00"), ("12:00", "13:00"),  # lunch break
-        ("13:00", "14:00"), ("14:00", "15:00"), ("15:00", "16:00"),
-        ("16:00", "17:00"),
+    schedule = [
+        ("08:00", "09:00", "class",  "Period 1"),
+        ("09:00", "10:00", "class",  "Period 2"),
+        ("10:00", "10:30", "break",  "Morning Break"),
+        ("10:30", "11:30", "class",  "Period 3"),
+        ("11:30", "12:30", "class",  "Period 4"),
+        ("12:30", "13:30", "lunch",  "Lunch Break"),
+        ("13:30", "14:30", "class",  "Period 5"),
+        ("14:30", "15:30", "class",  "Period 6"),
+        ("15:30", "16:30", "class",  "Period 7"),
+        ("16:30", "17:00", "class",  "Period 8"),
     ]
     idx = 0
     for day in days:
-        for i, (start, end) in enumerate(periods):
-            slot = TimeSlot(
+        for start, end, stype, label in schedule:
+            db.session.add(TimeSlot(
                 day=day,
                 start_time=start,
                 end_time=end,
                 slot_index=idx,
-                is_break=(start == "12:00"),
-            )
-            db.session.add(slot)
+                is_break=(stype in ("break", "lunch")),
+                slot_type=stype,
+                label=label,
+                template_id=template_id,
+            ))
             idx += 1
     db.session.commit()

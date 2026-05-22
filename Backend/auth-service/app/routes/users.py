@@ -5,6 +5,7 @@ from app.extensions import db
 from app.models.user import User, Role, UserSession
 from app.schemas import UserUpdateSchema
 from app.middleware.rbac import roles_required
+from app.services import auth_service
 
 users_bp = Blueprint("users", __name__, url_prefix="/api/v1/users")
 
@@ -129,3 +130,40 @@ def get_sessions(user_id):
 def list_roles():
     roles = Role.query.all()
     return jsonify({"success": True, "data": [r.to_dict() for r in roles]}), 200
+
+
+# Lecturer account management
+@users_bp.post("/lecturers")
+@jwt_required()
+@roles_required("admin", "timetable_officer", "hod")
+def create_lecturer():
+    body = request.get_json() or {}
+    required = ["email", "first_name", "last_name"]
+    missing = [f for f in required if not body.get(f)]
+    if missing:
+        return jsonify({"success": False, "message": f"Missing fields: {', '.join(missing)}"}), 422
+
+    try:
+        user, plain_password = auth_service.create_lecturer_account(body)
+    except ValueError as e:
+        return jsonify({"success": False, "message": str(e)}), 409
+    except RuntimeError as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+    response_data = user.to_dict()
+    response_data["default_password"] = plain_password  # visible to admin only at creation time
+    return jsonify({"success": True, "data": response_data, "message": "Lecturer account created. Credentials emailed."}), 201
+
+
+@users_bp.post("/<user_id>/resend-credentials")
+@jwt_required()
+@roles_required("admin", "timetable_officer", "hod")
+def resend_credentials(user_id):
+    try:
+        user, plain_password = auth_service.resend_credentials(user_id)
+    except ValueError as e:
+        return jsonify({"success": False, "message": str(e)}), 404
+
+    response_data = user.to_dict()
+    response_data["default_password"] = plain_password
+    return jsonify({"success": True, "data": response_data, "message": "New credentials generated and emailed."}), 200

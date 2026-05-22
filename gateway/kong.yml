@@ -64,12 +64,16 @@ services:
       - name: timetable-routes
         paths:
           - /api/v1/timetable
+          - /api/v1/universities
+          - /api/v1/programs
+          - /api/v1/student-groups
           - /api/v1/departments
           - /api/v1/rooms
           - /api/v1/lecturers
           - /api/v1/courses
           - /api/v1/constraints
           - /api/v1/time-slots
+          - /api/v1/templates
         strip_path: false
     plugins:
       - name: jwt

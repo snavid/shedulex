@@ -1,7 +1,10 @@
+import logging
 import os
 from flask import Flask, jsonify
 from app.config import config
 from app.extensions import db, migrate, jwt, cors
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(config_name: str = None) -> Flask:
@@ -23,8 +26,14 @@ def create_app(config_name: str = None) -> Flask:
         return jsonify({"status": "ok", "service": "timetable-engine"}), 200
 
     with app.app_context():
-        db.create_all()
-        from app.services.timetable_service import seed_default_slots
-        seed_default_slots()
+        try:
+            db.create_all()
+        except Exception as exc:
+            logger.warning("db.create_all() failed (non-fatal): %s", exc)
+        try:
+            from app.services.timetable_service import seed_default_slots
+            seed_default_slots()
+        except Exception as exc:
+            logger.warning("seed_default_slots() failed (non-fatal): %s", exc)
 
     return app

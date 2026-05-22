@@ -1,12 +1,17 @@
 import uuid
 import secrets
+import string
 from datetime import datetime, timezone, timedelta
 from flask import request, current_app
 from flask_jwt_extended import decode_token
 from app.extensions import db
 from app.models.user import User, Role, UserSession
 from app.services.token_service import generate_tokens, blacklist_token
-from app.services.email_service import send_verification_email, send_password_reset_email
+from app.services.email_service import (
+    send_verification_email,
+    send_password_reset_email,
+    send_lecturer_credentials_email,
+)
 
 
 ROLES = ["admin", "lecturer", "student", "timetable_officer", "hod"]
@@ -74,7 +79,12 @@ def login_user(email: str, password: str) -> tuple[User, dict]:
     user.last_login = datetime.now(timezone.utc)
     db.session.commit()
 
-    tokens = generate_tokens(user.id, {"role": user.role.name, "email": user.email})
+    extra_claims = {
+        "role": user.role.name,
+        "email": user.email,
+        "must_change_password": user.must_change_password,
+    }
+    tokens = generate_tokens(user.id, extra_claims)
     _persist_session(user.id, tokens["access_token"])
     return user, tokens
 
@@ -125,7 +135,100 @@ def change_password(user: User, current_password: str, new_password: str):
     if not user.check_password(current_password):
         raise ValueError("Current password is incorrect.")
     user.set_password(new_password)
+    user.must_change_password = False
     db.session.commit()
+
+
+def _generate_password(length: int = 12) -> str:
+    alphabet = string.ascii_letters + string.digits + "!@#$%"
+    while True:
+        pwd = "".join(secrets.choice(alphabet) for _ in range(length))
+        if (
+            any(c.isupper() for c in pwd)
+            and any(c.islower() for c in pwd)
+            and any(c.isdigit() for c in pwd)
+        ):
+            return pwd
+
+
+def create_lecturer_account(data: dict) -> tuple[User, str]:
+    """
+    Create a lecturer user account with auto-generated credentials.
+    Returns (user, plain_text_password) so the caller can display / resend them.
+    """
+    role = Role.query.filter_by(name="lecturer").first()
+    if not role:
+        raise RuntimeError("Lecturer role not found. Ensure roles are seeded.")
+
+    email = data["email"]
+    first_name = data["first_name"]
+    last_name = data["last_name"]
+
+    if User.query.filter_by(email=email).first():
+        raise ValueError(f"A user with email '{email}' already exists.")
+
+    plain_password = _generate_password()
+    username = data.get("username") or f"{first_name.lower()}.{last_name.lower()}.{secrets.token_hex(3)}"
+    username = username.replace(" ", "").lower()
+
+    if User.query.filter_by(username=username).first():
+        username = f"{username}.{secrets.token_hex(3)}"
+
+    user = User(
+        email=email,
+        username=username,
+        first_name=first_name,
+        last_name=last_name,
+        phone=data.get("phone"),
+        department=data.get("department"),
+        staff_id=data.get("staff_id"),
+        university_id=data.get("university_id"),
+        role_id=role.id,
+        is_active=True,
+        is_verified=True,          # admin-created accounts skip email verification
+        must_change_password=True, # force change on first login
+    )
+    user.set_password(plain_password)
+    db.session.add(user)
+    db.session.commit()
+
+    try:
+        send_lecturer_credentials_email(
+            to=email,
+            name=f"{first_name} {last_name}",
+            username=username,
+            password=plain_password,
+        )
+    except Exception:
+        current_app.logger.warning("Credential email failed to send for %s", email)
+
+    return user, plain_password
+
+
+def resend_credentials(user_id: str) -> tuple[User, str]:
+    """Reset the lecturer's password and resend credentials."""
+    user = User.query.get(user_id)
+    if not user:
+        raise ValueError("User not found.")
+    if user.role.name not in ("lecturer",):
+        raise ValueError("Credential resend is only available for lecturer accounts.")
+
+    plain_password = _generate_password()
+    user.set_password(plain_password)
+    user.must_change_password = True
+    db.session.commit()
+
+    try:
+        send_lecturer_credentials_email(
+            to=user.email,
+            name=f"{user.first_name} {user.last_name}",
+            username=user.username,
+            password=plain_password,
+        )
+    except Exception:
+        current_app.logger.warning("Credential resend email failed for %s", user.email)
+
+    return user, plain_password
 
 
 def _persist_session(user_id: str, access_token: str):

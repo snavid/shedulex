@@ -23,6 +23,9 @@ def generate():
             academic_year=body["academic_year"],
             name=body["name"],
             created_by=body.get("created_by") if is_internal_request() else get_jwt_identity(),
+            program_id=body.get("program_id"),
+            template_id=body.get("template_id"),
+            calendar_semester_id=body.get("calendar_semester_id"),
             config_overrides=body.get("ga_config"),
         )
     except (ValueError, RuntimeError) as e:
@@ -39,9 +42,10 @@ def generate():
 @service_or_jwt_required()
 def list_timetables():
     dept = request.args.get("department_id")
+    prog = request.args.get("program_id")
     sem = request.args.get("semester", type=int)
     status = request.args.get("status")
-    timetables = timetable_service.list_timetables(dept, sem, status)
+    timetables = timetable_service.list_timetables(dept, sem, status, prog)
     return ok(data=[t.to_dict() for t in timetables])
 
 
@@ -140,3 +144,34 @@ def restore_version(snapshot_id):
     except ValueError as ex:
         return fail(str(ex), status=404)
     return ok(data=restored.to_dict(include_entries=True))
+
+
+@timetable_bp.get("/<timetable_id>/violations")
+@service_or_jwt_required()
+def get_violations(timetable_id):
+    """Return the GA violation report stored on the timetable after generation."""
+    report = timetable_service.get_violation_report(timetable_id)
+    return ok(data=report, extra={"total": len(report)})
+
+
+@timetable_bp.patch("/<timetable_id>/entries/<entry_id>/lock")
+@service_or_jwt_required("admin", "timetable_officer")
+def toggle_lock(timetable_id, entry_id):
+    """Lock or unlock a single timetable entry."""
+    from app.models.domain import TimetableEntry
+    entry = TimetableEntry.query.filter_by(id=entry_id, timetable_id=timetable_id).first_or_404()
+    entry.is_locked = not entry.is_locked
+    from app.extensions import db
+    db.session.commit()
+    return ok(data=entry.to_dict())
+
+
+@timetable_bp.patch("/<timetable_id>/archive")
+@service_or_jwt_required("admin", "timetable_officer")
+def archive_timetable(timetable_id):
+    from app.models.domain import Timetable
+    from app.extensions import db
+    tt = Timetable.query.get_or_404(timetable_id)
+    tt.status = "archived"
+    db.session.commit()
+    return ok(data=tt.to_dict(), message="Timetable archived.")

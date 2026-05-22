@@ -1,3 +1,3 @@
-from .event import AcademicEvent, AcademicSemester
+from .event import AcademicEvent, AcademicSemester, AcademicHoliday
 
-__all__ = ["AcademicEvent", "AcademicSemester"]
+__all__ = ["AcademicEvent", "AcademicSemester", "AcademicHoliday"]
