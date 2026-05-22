@@ -761,8 +761,14 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
                     @dragend="onDragEnd"
                   >
                     <div class="flex items-start justify-between gap-1">
-                      <p class="font-bold truncate text-xs">{{ entry.course?.code }}</p>
-                      <div class="flex gap-0.5 flex-shrink-0">
+                      <p class="font-bold truncate text-xs leading-tight">{{ entry.course?.code }}</p>
+                      <div class="flex items-center gap-0.5 flex-shrink-0">
+                        <!-- Year badge: prefer student_group year, fall back to course year -->
+                        <span
+                          v-if="(entry.student_group?.year_of_study || entry.course?.year_of_study)"
+                          class="bg-white/25 text-white text-[9px] font-bold px-1 py-0.5 rounded leading-none"
+                          :title="`Year ${entry.student_group?.year_of_study || entry.course?.year_of_study} of study`"
+                        >Y{{ entry.student_group?.year_of_study || entry.course?.year_of_study }}</span>
                         <span v-if="entry.is_locked" class="text-white opacity-70" title="Locked">🔒</span>
                         <button v-else class="text-white opacity-0 group-hover:opacity-60" title="Lock"
                           @click.stop="toggleLock(entry)">🔓</button>
@@ -794,7 +800,13 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
             </div>
             <div :class="['w-1 self-stretch rounded', getEntryColor(entry.course?.id)]"></div>
             <div class="flex-1 min-w-0">
-              <p class="font-semibold text-gray-900 truncate">{{ entry.course?.name }}</p>
+              <div class="flex items-center gap-2">
+                <p class="font-semibold text-gray-900 truncate">{{ entry.course?.name }}</p>
+                <span
+                  v-if="entry.student_group?.year_of_study || entry.course?.year_of_study"
+                  class="flex-shrink-0 text-[10px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded"
+                >Year {{ entry.student_group?.year_of_study || entry.course?.year_of_study }}</span>
+              </div>
               <p class="text-xs text-gray-500">
                 {{ entry.course?.code }}
                 <span v-if="entry.course?.program"> · {{ entry.course.program.name }}</span>
@@ -922,7 +934,13 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
           <div :class="['p-5 text-white', getEntryColor(selectedEntry.course?.id)]">
             <div class="flex items-start justify-between gap-2">
               <div>
-                <p class="text-xs opacity-80 font-medium uppercase tracking-wide">{{ selectedEntry.course?.code }}</p>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <p class="text-xs opacity-80 font-medium uppercase tracking-wide">{{ selectedEntry.course?.code }}</p>
+                  <span
+                    v-if="selectedEntry.student_group?.year_of_study || selectedEntry.course?.year_of_study"
+                    class="text-[10px] font-bold bg-white/25 text-white px-1.5 py-0.5 rounded"
+                  >Year {{ selectedEntry.student_group?.year_of_study || selectedEntry.course?.year_of_study }}</span>
+                </div>
                 <h2 class="text-xl font-bold mt-0.5">{{ selectedEntry.course?.name }}</h2>
               </div>
               <button @click="closeModal" class="text-white opacity-70 hover:opacity-100 text-2xl leading-none">&times;</button>
