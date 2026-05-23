@@ -300,7 +300,9 @@ def create_lecturer():
     body = json_body()
     allowed = {
         "name", "email", "phone", "staff_id", "department_id",
-        "specialization", "max_hours_per_week", "availability", "user_id",
+        "specialization", "max_hours_per_week", "max_hours_per_day",
+        "max_consecutive_hours", "preferred_days", "unavailable_slots",
+        "availability", "user_id",
     }
     program_ids = body.pop("program_ids", [])
     lecturer = Lecturer(**{k: body[k] for k in body if k in allowed})

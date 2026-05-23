@@ -6,12 +6,14 @@ import { useToast } from "vue-toastification"
 import { documentApi, getErrorMessage, notificationApi, resourcesApi, timetableApi } from "@/api/client"
 import { useTimetableStore } from "@/stores/timetable"
 import { useAuthStore } from "@/stores/auth"
+import AIAssistantPanel from "@/components/AIAssistantPanel.vue"
 
 const route = useRoute()
 const store = useTimetableStore()
 const auth = useAuthStore()
 const toast = useToast()
 
+const aiPanel = ref(null)
 const loading = ref(true)
 const conflictsLoading = ref(false)
 const violationsLoading = ref(false)
@@ -584,7 +586,9 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
             </svg>
             {{ violationsLoading ? "Loading…" : "Violation Report" }}
           </button>
-          <RouterLink to="/ai-assistant" class="btn-secondary text-sm">AI Adjust</RouterLink>
+          <button @click="aiPanel?.open()" class="btn-secondary text-sm flex items-center gap-1.5">
+            <span class="text-violet-500">✦</span> AI Assist
+          </button>
         </div>
       </div>
 
@@ -846,9 +850,9 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
             <strong>{{ c.type?.replace(/_/g, ' ').toUpperCase() }}:</strong> {{ c.message }}
           </li>
         </ul>
-        <RouterLink to="/ai-assistant" class="mt-3 inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium">
-          Ask AI to resolve conflicts
-        </RouterLink>
+        <button @click="aiPanel?.open()" class="mt-3 inline-flex items-center gap-2 text-sm text-violet-600 hover:text-violet-700 font-medium">
+          <span>✦</span> Ask Sora AI to resolve conflicts
+        </button>
       </div>
 
       <!-- Export Center -->
@@ -925,6 +929,25 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
         </ul>
       </div>
     </template>
+
+    <!-- ── Floating AI Button ─────────────────────────────────────────────────── -->
+    <Teleport to="body">
+      <button
+        @click="aiPanel?.open()"
+        class="fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-600 text-white shadow-xl shadow-violet-500/40 flex items-center justify-center text-2xl hover:scale-110 active:scale-95 transition-transform select-none"
+        :class="store.conflicts.length ? 'animate-pulse' : ''"
+        title="Open Sora AI Assistant"
+      >
+        ✦
+      </button>
+      <AIAssistantPanel
+        ref="aiPanel"
+        :timetable-id="String(route.params.id)"
+        :timetable-name="store.currentTimetable?.name || 'Timetable'"
+        :conflict-count="store.conflicts.length"
+        @refresh="store.fetchTimetable(route.params.id)"
+      />
+    </Teleport>
 
     <!-- Session Detail Modal -->
     <Teleport to="body">
