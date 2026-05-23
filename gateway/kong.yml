@@ -88,18 +88,24 @@ services:
     protocol: http
     host: adjustment-upstream
     port: 80
+    # Long timeouts needed for SSE streaming connections (up to 5 min idle)
+    connect_timeout: 10000
+    write_timeout: 60000
+    read_timeout: 360000
     routes:
       - name: adjustment-routes
         paths:
           - /api/v1/adjustments
         strip_path: false
+        # Disable response buffering so SSE events reach the client immediately
+        response_buffering: false
     plugins:
       - name: jwt
         config:
           secret_is_base64: false
       - name: rate-limiting
         config:
-          minute: 60
+          minute: 120
           policy: local
 
   - name: notification-service

@@ -1,41 +1,77 @@
 """
-LangGraph agent graph for intelligent timetable adjustment.
+LangGraph agent graph — Sora AI Timetable Assistant.
 
-Graph topology:
-  START → classify_intent → agent_node → tool_node → agent_node (loop) → END
+Graph:  START → agent → tools → agent (loop) → END
+                              ↑ interrupt() from ask_user pauses here
 
-The agent loops calling tools until it resolves the request or hits the
-step limit, then summarises its actions.
+Features:
+  • MemorySaver checkpointer — enables interrupt/resume across HTTP requests
+  • interrupt() in ask_user  — pauses mid-execution for human decisions
+  • memory_context injection — compressed history + relevant past sessions
+  • stream(stream_mode="updates") — each node emits events for SSE
 """
 from __future__ import annotations
+
 import os
-from langchain_openai import ChatOpenAI
+
 from langchain_core.messages import SystemMessage
+from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
+
 from app.agents.state import AdjustmentState
 from app.agents.tools import ALL_TOOLS
 
-_SYSTEM_PROMPT = """You are an expert academic timetable scheduling assistant for the Shedulex system.
-You help timetable officers and administrators intelligently manage and adjust academic schedules.
+_SYSTEM_BASE = """\
+You are Sora, an expert AI assistant for the Shedulex academic timetabling system.
+You help timetable officers make intelligent, conflict-free scheduling decisions.
 
-You have access to the following tools:
-- get_timetable_entries: inspect a timetable (returns entry ids, courses, rooms, time_slot ids)
-- detect_timetable_conflicts: find scheduling conflicts
-- get_available_rooms: find available rooms by capacity/type
-- get_lecturer_free_slots: find free slots for a lecturer
-- move_timetable_entry: move ONE entry to a new time_slot_id when that slot is free for the same lecturer AND room
-- swap_timetable_entries: exchange time slots between TWO entries (use when you need to swap two classes)
-- suggest_best_venue: recommend the best room for a class size
+=== TOOLS ===
+• get_timetable_entries      — list all sessions with IDs (ALWAYS call first)
+• detect_timetable_conflicts — find lecturer/room/group clashes
+• get_available_rooms        — find rooms by capacity and type
+• get_lecturer_free_slots    — find when a lecturer is free
+• suggest_best_venue         — recommend the best-fit room
+• move_timetable_entry       — move ONE session to a different time slot
+• swap_timetable_entries     — swap the time slots of TWO sessions that are at DIFFERENT times
+• ask_user                   — PAUSE and ask the human for a decision
 
-Critical rules:
-1. Never claim a schedule change succeeded unless the corresponding tool returned a message starting with "Move successful:" or "Swap successful:".
-2. Prefer move_timetable_entry when moving to an empty slot; use swap_timetable_entries when exchanging two occupied slots.
-3. Always call get_timetable_entries first to obtain real entry_id and time_slot_id values from the database — never invent UUIDs.
-4. If a tool returns "failed:", explain the failure and what the user can do next — do not pretend it worked.
+=== CONFLICT RESOLUTION RULES ===
+A conflict means two sessions are scheduled at THE SAME time. The correct fix is:
+  1. Call get_lecturer_free_slots (or review entries) to find a FREE time slot.
+  2. Call move_timetable_entry to move ONE of the conflicting sessions to that free slot.
+  3. NEVER call swap_timetable_entries on two sessions that share the same time — swapping
+     them just exchanges their IDs with no visible change and wastes the user's time.
+  4. swap_timetable_entries is ONLY useful when two sessions are at DIFFERENT times and
+     you want to exchange their positions (e.g., swap Monday 9am ↔ Wednesday 2pm).
 
-Be professional, concise, and academic in tone.
+=== MOVE/SWAP RULES ===
+1. ALWAYS call get_timetable_entries first to get real entry_id / time_slot_id values.
+   Never invent UUIDs.
+2. Before moving, call get_lecturer_free_slots or review entries to find a slot where
+   the lecturer, room, and student group are all free.
+3. Only claim success when a tool returns "Move successful:" or "Swap successful:".
+4. If a move would create a NEW conflict, call ask_user BEFORE proceeding.
+   Describe the conflict clearly and offer labelled options (A / B / C …).
+5. After the user responds via ask_user, implement their chosen option automatically.
+6. If a tool returns "failed:", explain why and what the user can do next.
+7. Always pass a reason= when calling move or swap tools.
+8. End every response with a brief plain-English summary of what was done or found.
+
+=== SESSION ===
+Operating for: {user_name}
+Timetable ID:  {timetable_id}
 """
+
+
+def _system_prompt(state: AdjustmentState) -> str:
+    base = _SYSTEM_BASE.format(
+        user_name=state.get("user_name") or "timetable officer",
+        timetable_id=state.get("timetable_id") or "unknown",
+    )
+    mem = (state.get("memory_context") or "").strip()
+    return base + ("\n\n" + mem if mem else "")
 
 
 def _build_graph():
@@ -43,18 +79,20 @@ def _build_graph():
         model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
         api_key=os.environ.get("OPENAI_API_KEY", ""),
         temperature=0,
+        streaming=True,
     ).bind_tools(ALL_TOOLS)
 
     tool_node = ToolNode(ALL_TOOLS)
 
     def agent_node(state: AdjustmentState) -> dict:
-        messages = state["messages"]
-        if not any(isinstance(m, SystemMessage) for m in messages):
-            messages = [SystemMessage(content=_SYSTEM_PROMPT)] + messages
-        response = model.invoke(messages)
+        messages = list(state["messages"])
+        sys = SystemMessage(content=_system_prompt(state))
+        # Always keep system message fresh (memory_context may differ per run)
+        messages_no_sys = [m for m in messages if not isinstance(m, SystemMessage)]
+        response = model.invoke([sys] + messages_no_sys)
         return {"messages": [response]}
 
-    def should_continue(state: AdjustmentState) -> str:
+    def route_after_agent(state: AdjustmentState) -> str:
         last = state["messages"][-1]
         if hasattr(last, "tool_calls") and last.tool_calls:
             return "tools"
@@ -64,18 +102,21 @@ def _build_graph():
     graph.add_node("agent", agent_node)
     graph.add_node("tools", tool_node)
     graph.add_edge(START, "agent")
-    graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
+    graph.add_conditional_edges("agent", route_after_agent, {"tools": "tools", END: END})
     graph.add_edge("tools", "agent")
 
-    return graph.compile()
+    return graph.compile(checkpointer=MemorySaver())
 
 
-# Module-level singleton — compiled once, reused across requests
-_compiled_graph = None
+_graph = None
 
 
 def get_graph():
-    global _compiled_graph
-    if _compiled_graph is None:
-        _compiled_graph = _build_graph()
-    return _compiled_graph
+    global _graph
+    if _graph is None:
+        _graph = _build_graph()
+    return _graph
+
+
+def thread_config(session_id: str) -> dict:
+    return {"configurable": {"thread_id": session_id}, "recursion_limit": 48}

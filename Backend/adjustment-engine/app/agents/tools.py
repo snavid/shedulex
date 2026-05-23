@@ -1,53 +1,95 @@
 """
-LangChain tools that the AI agent can call to inspect and modify timetables.
-Each tool communicates with the timetable-engine service via HTTP.
+LangChain tools for the Sora AI timetable assistant.
+
+Every mutation tool immediately creates a version snapshot with a rich
+description so the audit trail is complete (who did what and why).
 """
+from __future__ import annotations
+
+import logging
 import os
 import httpx
 from langchain_core.tools import tool
+from langgraph.types import interrupt
+
+from app.services.timetable_snapshots import create_timetable_snapshot
+
+logger = logging.getLogger(__name__)
 
 TIMETABLE_URL = os.environ.get("TIMETABLE_SERVICE_URL", "http://timetable-engine:5002")
-INTERNAL_SERVICE_KEY = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
+INTERNAL_KEY  = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
 
 
-def _headers() -> dict:
-    return {"X-Internal-Service-Key": INTERNAL_SERVICE_KEY}
+def _h():
+    return {"X-Internal-Service-Key": INTERNAL_KEY}
+
+def _get(path):
+    with httpx.Client(timeout=20) as c:
+        r = c.get(f"{TIMETABLE_URL}{path}", headers=_h())
+        if r.status_code == 401:
+            raise RuntimeError(f"401 Unauthorized — INTERNAL_SERVICE_KEY mismatch (key starts: {INTERNAL_KEY[:4]}…)")
+        if r.status_code == 404:
+            raise RuntimeError(f"404 Not Found: {TIMETABLE_URL}{path}")
+        r.raise_for_status()
+        return r.json()
+
+def _post(path, payload):
+    with httpx.Client(timeout=20) as c:
+        r = c.post(f"{TIMETABLE_URL}{path}", json=payload, headers=_h()); r.raise_for_status(); return r.json()
+
+def _patch(path, payload):
+    with httpx.Client(timeout=20) as c:
+        r = c.patch(f"{TIMETABLE_URL}{path}", json=payload, headers=_h()); r.raise_for_status(); return r.json()
 
 
-def _get(path: str) -> dict:
-    with httpx.Client(timeout=15) as client:
-        resp = client.get(f"{TIMETABLE_URL}{path}", headers=_headers())
-        resp.raise_for_status()
-        return resp.json()
-
-
-def _post(path: str, payload: dict) -> dict:
-    with httpx.Client(timeout=15) as client:
-        resp = client.post(f"{TIMETABLE_URL}{path}", json=payload, headers=_headers())
-        resp.raise_for_status()
-        return resp.json()
-
-
-def _patch(path: str, payload: dict) -> dict:
-    with httpx.Client(timeout=15) as client:
-        resp = client.patch(f"{TIMETABLE_URL}{path}", json=payload, headers=_headers())
-        resp.raise_for_status()
-        return resp.json()
-
+# ── Read-only tools ───────────────────────────────────────────────────────────
 
 @tool
 def get_timetable_entries(timetable_id: str) -> str:
-    """Fetch all entries in a given timetable. Returns JSON of entries."""
+    """
+    Fetch all scheduled entries for a timetable. Returns a compact list with
+    entry_id, course code/name, year, program, room, lecturer, student_group,
+    day, start_time, end_time, time_slot_id, and is_locked.
+    ALWAYS call this first to get real IDs before any mutation.
+    """
     try:
         data = _get(f"/api/v1/timetable/{timetable_id}")
-        return str(data.get("data", {}).get("entries", []))
+        entries = (data.get("data") or {}).get("entries", [])
+        summary = []
+        for e in entries:
+            course   = e.get("course")   or {}
+            room     = e.get("room")     or {}
+            lec      = e.get("lecturer") or {}
+            group    = e.get("student_group") or {}
+            ts       = e.get("time_slot") or {}
+            program  = course.get("program") or {}
+            summary.append({
+                "entry_id":     e.get("id"),
+                "course":       f"{course.get('code')} – {course.get('name')}",
+                "year":         course.get("year_of_study"),
+                "program":      program.get("code"),
+                "room":         room.get("code"),
+                "room_id":      room.get("id"),
+                "lecturer":     lec.get("name"),
+                "lecturer_id":  lec.get("id"),
+                "group":        group.get("code"),
+                "day":          ts.get("day"),
+                "start_time":   ts.get("start_time"),
+                "end_time":     ts.get("end_time"),
+                "time_slot_id": e.get("time_slot", {}).get("id"),
+                "is_locked":    e.get("is_locked", False),
+            })
+        return str(summary)
     except Exception as e:
         return f"Error fetching timetable: {e}"
 
 
 @tool
 def detect_timetable_conflicts(timetable_id: str) -> str:
-    """Detect all conflicts in a timetable (room clashes, lecturer double-bookings)."""
+    """
+    Detect all hard conflicts: lecturer double-bookings, room double-bookings,
+    student group clashes. Returns each conflict with the involved entries and slot.
+    """
     try:
         data = _get(f"/api/v1/timetable/{timetable_id}/conflicts")
         return str(data.get("data", []))
@@ -57,81 +99,163 @@ def detect_timetable_conflicts(timetable_id: str) -> str:
 
 @tool
 def get_available_rooms(min_capacity: int = 0, requires_lab: bool = False) -> str:
-    """Find available rooms filtered by capacity and type."""
+    """
+    List available rooms. Filter by minimum student capacity and lab requirement.
+    Returns room id, name, code, capacity, and room_type.
+    """
     try:
         data = _get("/api/v1/rooms")
-        rooms = data.get("data", [])
-        filtered = [
-            r for r in rooms
-            if r.get("is_available", True)
-            and r.get("capacity", 0) >= min_capacity
-            and (not requires_lab or r.get("room_type") == "lab")
-        ]
-        return str(filtered)
+        rooms = [r for r in (data.get("data") or [])
+                 if r.get("is_available", True)
+                 and r.get("capacity", 0) >= min_capacity
+                 and (not requires_lab or r.get("room_type") == "lab")]
+        return str(rooms)
     except Exception as e:
         return f"Error fetching rooms: {e}"
 
 
 @tool
 def get_lecturer_free_slots(lecturer_id: str, timetable_id: str) -> str:
-    """Find free time slots for a specific lecturer in a timetable."""
+    """
+    Find all time slots where the lecturer has no session scheduled.
+    Returns free slot objects (id, day, start_time, end_time).
+    """
     try:
         entries_data = _get(f"/api/v1/timetable/{timetable_id}")
-        entries = entries_data.get("data", {}).get("entries", [])
-        busy_slots = {
-            e["time_slot"]["id"]
-            for e in entries
-            if e.get("lecturer", {}).get("id") == lecturer_id
-        }
+        entries = (entries_data.get("data") or {}).get("entries", [])
+        busy = {(e.get("time_slot") or {}).get("id") for e in entries
+                if (e.get("lecturer") or {}).get("id") == lecturer_id} - {None}
         slots_data = _get("/api/v1/time-slots")
-        free = [s for s in slots_data.get("data", []) if s["id"] not in busy_slots]
+        free = [s for s in (slots_data.get("data") or [])
+                if s["id"] not in busy and not s.get("is_break")]
         return str(free)
     except Exception as e:
         return f"Error finding free slots: {e}"
 
 
 @tool
-def swap_timetable_entries(entry1_id: str, entry2_id: str) -> str:
-    """Swap the time slots of two timetable entries (drag-and-drop move)."""
+def suggest_best_venue(student_count: int, requires_lab: bool = False) -> str:
+    """
+    Recommend the smallest room that fits the student count and type.
+    Returns the best match with capacity, name, and room_type.
+    """
     try:
-        result = _post("/api/v1/timetable/entries/swap", {
-            "entry1_id": entry1_id,
-            "entry2_id": entry2_id,
-        })
-        return f"Swap successful: {result}"
+        data = _get("/api/v1/rooms")
+        suitable = sorted(
+            [r for r in (data.get("data") or [])
+             if r.get("is_available", True)
+             and r.get("capacity", 0) >= student_count
+             and (not requires_lab or r.get("room_type") == "lab")],
+            key=lambda r: r["capacity"],
+        )
+        if suitable:
+            b = suitable[0]
+            return f"Best venue: {b['name']} ({b['code']}) — capacity {b['capacity']}, type: {b['room_type']}"
+        return "No suitable venue found."
     except Exception as e:
-        return f"Swap failed: {e}"
+        return f"Error suggesting venue: {e}"
 
+
+# ── Mutation tools (each creates a snapshot) ─────────────────────────────────
 
 @tool
-def move_timetable_entry(entry_id: str, time_slot_id: str) -> str:
-    """Move one timetable entry to a different time slot (no swap). Use when the target slot is free for that lecturer and room."""
+def move_timetable_entry(
+    timetable_id: str,
+    entry_id: str,
+    time_slot_id: str,
+    reason: str = "",
+) -> str:
+    """
+    Move one entry to a different time slot. Use when that slot is free for the
+    lecturer, room, and student group. Always provide a reason for the audit trail.
+    """
     try:
-        result = _patch(f"/api/v1/timetable/entries/{entry_id}", {"time_slot_id": time_slot_id})
-        return f"Move successful: {result}"
+        entries_data = _get(f"/api/v1/timetable/{timetable_id}")
+        entries = (entries_data.get("data") or {}).get("entries", [])
+        entry = next((e for e in entries if e.get("id") == entry_id), {})
+
+        _patch(f"/api/v1/timetable/entries/{entry_id}", {"time_slot_id": time_slot_id})
+
+        course = entry.get("course")   or {}
+        lec    = entry.get("lecturer") or {}
+        old_ts = entry.get("time_slot") or {}
+        desc = (
+            f"Sora AI moved {course.get('code', entry_id)} ({course.get('name', '')}) "
+            f"from {old_ts.get('day','?')} {old_ts.get('start_time','?')} "
+            f"to slot {time_slot_id}. "
+            f"Lecturer: {lec.get('name','?')}. "
+            f"Reason: {reason or 'AI schedule optimisation'}."
+        )
+        create_timetable_snapshot(timetable_id, desc, "Sora AI")
+        return f"Move successful: {desc}"
     except Exception as e:
         return f"Move failed: {e}"
 
 
 @tool
-def suggest_best_venue(student_count: int, requires_lab: bool = False) -> str:
-    """Suggest the best available venue for a class given student count and requirements."""
+def swap_timetable_entries(
+    timetable_id: str,
+    entry1_id: str,
+    entry2_id: str,
+    reason: str = "",
+) -> str:
+    """
+    Swap the time slots of TWO entries that are currently at DIFFERENT times.
+    Do NOT use this to fix conflicts — conflicting entries are at the same time,
+    so swapping them has no effect. Use move_timetable_entry to fix conflicts.
+    Always provide a reason for the audit trail.
+    """
     try:
-        data = _get("/api/v1/rooms")
-        rooms = data.get("data", [])
-        suitable = sorted(
-            [r for r in rooms
-             if r.get("is_available", True)
-             and r.get("capacity", 0) >= student_count
-             and (not requires_lab or r.get("room_type") == "lab")],
-            key=lambda r: r["capacity"]
+        entries_data = _get(f"/api/v1/timetable/{timetable_id}")
+        entries = (entries_data.get("data") or {}).get("entries", [])
+        e1 = next((e for e in entries if e.get("id") == entry1_id), {})
+        e2 = next((e for e in entries if e.get("id") == entry2_id), {})
+
+        ts1 = e1.get("time_slot") or {}
+        ts2 = e2.get("time_slot") or {}
+        if ts1.get("id") and ts1.get("id") == ts2.get("id"):
+            return (
+                "Swap failed: both entries are in the same time slot — swapping them "
+                "would have no visible effect. Use move_timetable_entry to move one of "
+                "them to a different free slot instead."
+            )
+
+        _post("/api/v1/timetable/entries/swap", {"entry1_id": entry1_id, "entry2_id": entry2_id})
+
+        c1, ts1 = e1.get("course") or {}, e1.get("time_slot") or {}
+        c2, ts2 = e2.get("course") or {}, e2.get("time_slot") or {}
+        desc = (
+            f"Sora AI swapped {c1.get('code', entry1_id)} "
+            f"({ts1.get('day','?')} {ts1.get('start_time','?')}) ↔ "
+            f"{c2.get('code', entry2_id)} "
+            f"({ts2.get('day','?')} {ts2.get('start_time','?')}). "
+            f"Reason: {reason or 'AI schedule optimisation'}."
         )
-        if suitable:
-            best = suitable[0]
-            return f"Best venue: {best['name']} (capacity={best['capacity']}, type={best['room_type']})"
-        return "No suitable venue found."
+        create_timetable_snapshot(timetable_id, desc, "Sora AI")
+        return f"Swap successful: {desc}"
     except Exception as e:
-        return f"Error suggesting venue: {e}"
+        return f"Swap failed: {e}"
+
+
+# ── Human-in-the-loop ─────────────────────────────────────────────────────────
+
+@tool
+def ask_user(question: str) -> str:
+    """
+    Pause and ask the human user a question when their decision is needed.
+    Use this whenever you encounter a conflict with no clear best resolution —
+    for example, which session to prioritise, whether to force-place despite a clash,
+    or which of several free slots to use.
+
+    Format the question as:
+      1. What is the conflict / situation?
+      2. What are the options? (Label them A, B, C …)
+      3. What does each option do?
+
+    After the user responds, implement their chosen option automatically.
+    """
+    answer = interrupt({"type": "user_input", "question": question})
+    return f"User decided: {answer}"
 
 
 ALL_TOOLS = [
@@ -139,7 +263,8 @@ ALL_TOOLS = [
     detect_timetable_conflicts,
     get_available_rooms,
     get_lecturer_free_slots,
-    swap_timetable_entries,
-    move_timetable_entry,
     suggest_best_venue,
+    move_timetable_entry,
+    swap_timetable_entries,
+    ask_user,
 ]

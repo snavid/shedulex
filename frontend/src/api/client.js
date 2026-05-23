@@ -150,12 +150,19 @@ export const resourcesApi = {
 }
 
 export const adjustmentApi = {
-  // AI chat can run longer due to LLM/tool execution cycles.
+  // Legacy single-shot API
   chat: (data) => api.post("/adjustments/chat", data, { timeout: 180000 }),
   requestStatus: (requestId) => api.get(`/adjustments/requests/${requestId}`),
   history: (params) => api.get("/adjustments/history", { params }),
   conflicts: (params) => api.get("/adjustments/conflicts", { params }),
   suggestSlots: (data) => api.post("/adjustments/suggest-slots", data),
+  // Session-based AI API
+  createSession:  (data)     => api.post("/adjustments/sessions", data),
+  listSessions:   (params)   => api.get("/adjustments/sessions", { params }),
+  getSession:     (id)       => api.get(`/adjustments/sessions/${id}`),
+  sessionChat:    (id, data) => api.post(`/adjustments/sessions/${id}/chat`, data, { timeout: 30000 }),
+  sessionRespond: (id, data) => api.post(`/adjustments/sessions/${id}/respond`, data),
+  archiveSession: (id)       => api.post(`/adjustments/sessions/${id}/archive`),
 }
 
 export const notificationApi = {
