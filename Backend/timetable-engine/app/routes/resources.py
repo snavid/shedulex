@@ -1,13 +1,13 @@
 """CRUD routes for Universities, Departments, Programs, StudentGroups, Rooms,
 Lecturers, Courses, TimeSlots, TimetableTemplates, and Constraints."""
 from flask import Blueprint, request
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.extensions import db
 from app.models.domain import (
     Constraint, Course, Department, Lecturer, Program,
     Room, StudentGroup, TimeSlot, TimetableTemplate, TemplateTimeBlock,
-    University,
+    TimetableEntry, University,
 )
 from app.security import service_or_jwt_required
 from app.utils.responses import fail, json_body, ok
@@ -45,9 +45,8 @@ def _delete(instance):
     db.session.commit()
 
 
-# Universities
+# Universities — GET is public so the registration form can list them without a token
 @resources_bp.get("/universities")
-@service_or_jwt_required()
 def list_universities():
     unis = University.query.filter_by(is_active=True).all()
     return ok(data=[u.to_dict() for u in unis])
@@ -344,6 +343,7 @@ def list_courses():
         joinedload(Course.department),
         joinedload(Course.program),
         joinedload(Course.lecturer).joinedload(Lecturer.department),
+        selectinload(Course.student_groups),
     ).filter_by(is_active=True)
     if department_id:
         query = query.filter_by(department_id=department_id)
@@ -386,6 +386,66 @@ def delete_course(course_id):
     course.is_active = False
     db.session.commit()
     return ok(message="Course deactivated.")
+
+
+# Course ↔ StudentGroup assignments
+@resources_bp.get("/courses/<course_id>/groups")
+@service_or_jwt_required()
+def list_course_groups(course_id):
+    course = Course.query.get_or_404(course_id)
+    return ok(data=[{"id": g.id, "code": g.code, "name": g.name, "student_count": g.student_count} for g in course.student_groups])
+
+
+@resources_bp.post("/courses/<course_id>/groups")
+@service_or_jwt_required(*WRITE_ROLES)
+def set_course_groups(course_id):
+    """Replace the full set of student groups assigned to a course."""
+    course = Course.query.get_or_404(course_id)
+    body = json_body()
+    group_ids = body.get("group_ids", [])
+    groups = StudentGroup.query.filter(StudentGroup.id.in_(group_ids)).all() if group_ids else []
+    course.student_groups = groups
+    db.session.commit()
+    return ok(data=course.to_dict())
+
+
+@resources_bp.delete("/courses/<course_id>/groups/<group_id>")
+@service_or_jwt_required(*WRITE_ROLES)
+def remove_course_group(course_id, group_id):
+    course = Course.query.get_or_404(course_id)
+    group = StudentGroup.query.get_or_404(group_id)
+    if group in course.student_groups:
+        course.student_groups.remove(group)
+        db.session.commit()
+    return ok(message="Group removed from course.")
+
+
+# Substitute a sick/absent lecturer across all entries in a timetable
+@resources_bp.post("/timetable/<timetable_id>/substitute-lecturer")
+@service_or_jwt_required(*WRITE_ROLES)
+def substitute_lecturer(timetable_id):
+    body = json_body()
+    sick_id = body.get("sick_lecturer_id")
+    replacement_id = body.get("replacement_lecturer_id")
+    if not sick_id or not replacement_id:
+        return fail("sick_lecturer_id and replacement_lecturer_id are required.", status=422)
+
+    replacement = Lecturer.query.get(replacement_id)
+    if not replacement or not replacement.is_active:
+        return fail("Replacement lecturer not found or inactive.", status=404)
+
+    entries = (
+        TimetableEntry.query
+        .filter_by(timetable_id=timetable_id, lecturer_id=sick_id)
+        .all()
+    )
+    if not entries:
+        return ok(message="No entries found for the sick lecturer in this timetable.", data={"updated": 0})
+
+    for entry in entries:
+        entry.lecturer_id = replacement_id
+    db.session.commit()
+    return ok(data={"updated": len(entries), "replacement": replacement.to_dict()})
 
 
 # Constraints

@@ -94,7 +94,8 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
         room = rooms.get(gene.room_id, {})
         slot = slots.get(gene.time_slot_id, {})
         lec_id = course.get("lecturer_id", "")
-        grp_id = course.get("student_group_id", "")
+        # Gene carries explicit group when courses are exploded by group; fall back to course-level
+        grp_id = gene.student_group_id or course.get("student_group_id", "")
         slot_day = slot.get("day", "")
         slot_idx = slot.get("slot_index", 0)
         slot_type = slot.get("slot_type", "class")
@@ -303,7 +304,7 @@ def violation_report(chromosome: Chromosome, context: dict) -> list[dict]:
         room = rooms.get(gene.room_id, {})
         slot = slots.get(gene.time_slot_id, {})
         lec_id = course.get("lecturer_id", "")
-        grp_id = course.get("student_group_id", "")
+        grp_id = gene.student_group_id or course.get("student_group_id", "")
         slot_day = slot.get("day", "")
         slot_type = slot.get("slot_type", "class")
         slot_label = f"{slot_day} {slot.get('start_time', '')}–{slot.get('end_time', '')}"

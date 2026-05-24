@@ -61,22 +61,24 @@ def generate_timetable(
     db_constraints_raw = constraint_q.all()
     db_constraints_data = [c.to_dict() for c in db_constraints_raw]
 
-    # Serialise domain objects → plain dicts for GA layer
-    courses_data = [
-        {
+    # Serialise domain objects → plain dicts for GA layer.
+    # student_group_ids: explicit assignments take priority; fall back to program-inferred group.
+    courses_data = []
+    for c in courses:
+        explicit_groups = [g.id for g in (c.student_groups or [])]
+        courses_data.append({
             "id": c.id,
             "name": c.name,
             "lecturer_id": c.lecturer_id,
             "student_count": c.student_count,
-            "student_group_id": _resolve_student_group(c),
+            "student_group_id": _resolve_student_group(c) if not explicit_groups else explicit_groups[0],
+            "student_group_ids": explicit_groups,  # GA population uses this to explode by group
             "requires_lab": c.requires_lab,
             "weekly_hours": c.weekly_hours,
             "department_id": c.department_id,
             "program_id": c.program_id,
             "priority": c.priority,
-        }
-        for c in courses
-    ]
+        })
     rooms_data = [
         {
             "id": r.id,
@@ -162,7 +164,6 @@ def generate_timetable(
         )
 
     lecturer_by_course = {c.id: c.lecturer_id for c in courses}
-    group_by_course = {c.id: _resolve_student_group(c) for c in courses}
 
     for gene in result.best_chromosome.genes:
         entry = TimetableEntry(
@@ -171,7 +172,7 @@ def generate_timetable(
             lecturer_id=lecturer_by_course.get(gene.course_id),
             room_id=gene.room_id,
             time_slot_id=gene.time_slot_id,
-            student_group_id=group_by_course.get(gene.course_id),
+            student_group_id=gene.student_group_id or None,
         )
         db.session.add(entry)
 

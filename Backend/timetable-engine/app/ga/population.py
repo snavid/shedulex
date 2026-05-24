@@ -79,18 +79,32 @@ def initialize_population(
 
         return candidates if candidates else schedulable_slots
 
+    # Expand courses into (course, group) scheduling units.
+    # If a course has explicit student_group_ids, create one unit per group.
+    # If not, create one unit with the pre-resolved student_group_id (may be empty).
+    scheduling_units: list[dict] = []
+    for course in sorted_courses:
+        group_ids: list[str] = course.get("student_group_ids") or []
+        if group_ids:
+            for gid in group_ids:
+                scheduling_units.append({**course, "student_group_id": gid})
+        else:
+            scheduling_units.append(course)
+
     population: list[Chromosome] = []
 
     for _ in range(size):
         genes: list[Gene] = []
         lec_used: dict[str, list[str]] = {}  # lec_id → [slot_ids used so far]
+        group_used: dict[str, list[str]] = {}  # group_id → [slot_ids used so far]
 
-        for course in sorted_courses:
-            sessions = max(1, course.get("weekly_hours", 1))
-            lec_id = course.get("lecturer_id", "")
+        for unit in scheduling_units:
+            sessions = max(1, unit.get("weekly_hours", 1))
+            lec_id = unit.get("lecturer_id", "")
+            group_id = unit.get("student_group_id", "")
 
             # Pick room pool
-            if course.get("requires_lab") and lab_rooms:
+            if unit.get("requires_lab") and lab_rooms:
                 room_pool = lab_rooms
             elif non_lab_rooms:
                 room_pool = non_lab_rooms
@@ -102,10 +116,15 @@ def initialize_population(
 
             if lec_id not in lec_used:
                 lec_used[lec_id] = []
+            if group_id and group_id not in group_used:
+                group_used[group_id] = []
 
             for session_idx in range(sessions):
-                # Try to pick a slot not already used by this lecturer in this chromosome
-                unused = [s for s in slot_pool if s["id"] not in lec_used[lec_id]]
+                # Avoid slots already used by this lecturer or this group
+                busy = set(lec_used[lec_id])
+                if group_id:
+                    busy |= set(group_used[group_id])
+                unused = [s for s in slot_pool if s["id"] not in busy]
                 chosen_slot = (
                     random.choice(unused)
                     if unused
@@ -114,12 +133,15 @@ def initialize_population(
                 chosen_room = random.choice(room_pool)
 
                 lec_used[lec_id].append(chosen_slot["id"])
+                if group_id:
+                    group_used[group_id].append(chosen_slot["id"])
 
                 genes.append(Gene(
-                    course_id=course["id"],
+                    course_id=unit["id"],
                     session_index=session_idx,
                     room_id=chosen_room["id"],
                     time_slot_id=chosen_slot["id"],
+                    student_group_id=group_id,
                 ))
 
         population.append(Chromosome(genes=genes))

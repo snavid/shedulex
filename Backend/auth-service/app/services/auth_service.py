@@ -1,6 +1,10 @@
 import uuid
 import secrets
 import string
+import json
+import os
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone, timedelta
 from flask import request, current_app
 from flask_jwt_extended import decode_token
@@ -12,6 +16,51 @@ from app.services.email_service import (
     send_password_reset_email,
     send_lecturer_credentials_email,
 )
+
+TIMETABLE_URL = os.environ.get("TIMETABLE_SERVICE_URL", "http://timetable-engine:5002")
+INTERNAL_KEY  = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
+
+
+def _resolve_university_id(university_id: str | None, university_name: str | None, university_code: str | None) -> str | None:
+    """
+    Return a university_id.
+    - If university_id is explicitly provided, return it directly.
+    - If university_name + code are provided, call timetable-engine to create or find the university.
+    - Otherwise return None.
+    """
+    if university_id:
+        return university_id
+    if not university_name or not university_code:
+        return None
+
+    payload = json.dumps({"name": university_name, "code": university_code}).encode()
+    req = urllib.request.Request(
+        f"{TIMETABLE_URL}/api/v1/universities",
+        data=payload,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Internal-Service-Key": INTERNAL_KEY,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read())
+            return (body.get("data") or {}).get("id")
+    except urllib.error.HTTPError as e:
+        # 409 = already exists; try to find it
+        if e.code == 409:
+            list_req = urllib.request.Request(
+                f"{TIMETABLE_URL}/api/v1/universities",
+                headers={"X-Internal-Service-Key": INTERNAL_KEY},
+            )
+            with urllib.request.urlopen(list_req, timeout=10) as resp2:
+                unis = json.loads(resp2.read()).get("data") or []
+                match = next((u for u in unis if u.get("code") == university_code), None)
+                return match["id"] if match else None
+    except Exception:
+        current_app.logger.warning("Could not resolve university from timetable-engine.")
+        return None
 
 
 ROLES = ["admin", "lecturer", "student", "timetable_officer", "hod"]
@@ -43,6 +92,12 @@ def register_user(data: dict) -> tuple[User, dict]:
     if User.query.filter_by(username=data["username"]).first():
         raise ValueError("This username is already taken.")
 
+    university_id = _resolve_university_id(
+        data.get("university_id"),
+        data.get("university_name"),
+        data.get("university_code"),
+    )
+
     verification_token = secrets.token_urlsafe(32)
     user = User(
         email=data["email"],
@@ -52,7 +107,7 @@ def register_user(data: dict) -> tuple[User, dict]:
         phone=data.get("phone"),
         department=data.get("department"),
         staff_id=data.get("staff_id"),
-        university_id=data.get("university_id"),
+        university_id=university_id,
         role_id=role.id,
         verification_token=verification_token,
     )

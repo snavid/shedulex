@@ -41,6 +41,10 @@ def _patch(path, payload):
     with httpx.Client(timeout=20) as c:
         r = c.patch(f"{TIMETABLE_URL}{path}", json=payload, headers=_h()); r.raise_for_status(); return r.json()
 
+def _delete(path):
+    with httpx.Client(timeout=20) as c:
+        r = c.delete(f"{TIMETABLE_URL}{path}", headers=_h()); r.raise_for_status(); return r.json()
+
 
 # ── Read-only tools ───────────────────────────────────────────────────────────
 
@@ -237,6 +241,78 @@ def swap_timetable_entries(
         return f"Swap failed: {e}"
 
 
+@tool
+def get_available_lecturers(department_id: str = "") -> str:
+    """
+    List all active lecturers, optionally filtered by department.
+    Returns lecturer id, name, email, specialization, and max_hours_per_week.
+    Use this to find a replacement when a lecturer is sick or unavailable.
+    """
+    try:
+        data = _get("/api/v1/lecturers")
+        lecturers = data.get("data") or []
+        if department_id:
+            lecturers = [l for l in lecturers if (l.get("department") or {}).get("id") == department_id]
+        summary = [
+            {
+                "id": l.get("id"),
+                "name": l.get("name"),
+                "email": l.get("email"),
+                "specialization": l.get("specialization"),
+                "max_hours_per_week": l.get("max_hours_per_week"),
+                "department": (l.get("department") or {}).get("name"),
+            }
+            for l in lecturers
+        ]
+        return str(summary)
+    except Exception as e:
+        return f"Error fetching lecturers: {e}"
+
+
+@tool
+def substitute_lecturer(
+    timetable_id: str,
+    sick_lecturer_id: str,
+    replacement_lecturer_id: str,
+    reason: str = "",
+) -> str:
+    """
+    Substitute a sick or absent lecturer with a replacement for ALL their sessions
+    in this timetable. Call get_timetable_entries first to confirm the sick lecturer's
+    entries. Call get_available_lecturers to find a qualified replacement.
+    Always provide a reason (e.g. 'Lecturer sick — emergency substitution').
+    """
+    try:
+        # Get names for the audit description
+        entries_data = _get(f"/api/v1/timetable/{timetable_id}")
+        entries = (entries_data.get("data") or {}).get("entries", [])
+        sick_entries = [e for e in entries if (e.get("lecturer") or {}).get("id") == sick_lecturer_id]
+
+        if not sick_entries:
+            return f"No entries found for lecturer {sick_lecturer_id} in timetable {timetable_id}."
+
+        sick_name = (sick_entries[0].get("lecturer") or {}).get("name", sick_lecturer_id)
+
+        result = _post(f"/api/v1/timetable/{timetable_id}/substitute-lecturer", {
+            "sick_lecturer_id": sick_lecturer_id,
+            "replacement_lecturer_id": replacement_lecturer_id,
+        })
+
+        replacement = (result.get("data") or {}).get("replacement", {})
+        replacement_name = replacement.get("name", replacement_lecturer_id)
+        updated = (result.get("data") or {}).get("updated", 0)
+
+        desc = (
+            f"Sora AI substituted {sick_name} → {replacement_name} "
+            f"for {updated} session(s) in timetable {timetable_id}. "
+            f"Reason: {reason or 'Lecturer substitution'}."
+        )
+        create_timetable_snapshot(timetable_id, desc, "Sora AI")
+        return f"Substitution successful: {desc}"
+    except Exception as e:
+        return f"Substitution failed: {e}"
+
+
 # ── Human-in-the-loop ─────────────────────────────────────────────────────────
 
 @tool
@@ -266,5 +342,7 @@ ALL_TOOLS = [
     suggest_best_venue,
     move_timetable_entry,
     swap_timetable_entries,
+    get_available_lecturers,
+    substitute_lecturer,
     ask_user,
 ]

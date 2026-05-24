@@ -73,6 +73,13 @@ lecturer_programs = db.Table(
     db.Column("program_id", db.String(36), db.ForeignKey("programs.id"), primary_key=True),
 )
 
+# Association table: many courses ↔ many student_groups
+course_student_groups = db.Table(
+    "course_student_groups",
+    db.Column("course_id", db.String(36), db.ForeignKey("courses.id", ondelete="CASCADE"), primary_key=True),
+    db.Column("student_group_id", db.String(36), db.ForeignKey("student_groups.id", ondelete="CASCADE"), primary_key=True),
+)
+
 
 class University(db.Model):
     __tablename__ = "universities"
@@ -186,6 +193,7 @@ class StudentGroup(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     program = db.relationship("Program", back_populates="student_groups")
+    courses = db.relationship("Course", secondary="course_student_groups", back_populates="student_groups")
 
     def to_dict(self):
         return {
@@ -198,6 +206,7 @@ class StudentGroup(db.Model):
             "semester": self.semester,
             "student_count": self.student_count,
             "is_active": self.is_active,
+            "course_ids": [c.id for c in self.courses] if self.courses else [],
         }
 
 
@@ -289,6 +298,7 @@ class Course(db.Model):
     department = db.relationship("Department", back_populates="courses")
     program = db.relationship("Program", back_populates="courses")
     lecturer = db.relationship("Lecturer", back_populates="courses")
+    student_groups = db.relationship("StudentGroup", secondary="course_student_groups", back_populates="courses")
 
     def to_dict(self):
         return {
@@ -301,6 +311,8 @@ class Course(db.Model):
             "program": self.program.to_dict() if self.program else None,
             "lecturer": self.lecturer.to_dict() if self.lecturer else None,
             "department": self.department.to_dict() if self.department else None,
+            "student_group_ids": [g.id for g in self.student_groups] if self.student_groups else [],
+            "student_groups": [{"id": g.id, "code": g.code, "name": g.name} for g in self.student_groups] if self.student_groups else [],
         }
 
 

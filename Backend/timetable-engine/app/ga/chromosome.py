@@ -15,9 +15,10 @@ class Gene:
     session_index: int   # which weekly session for this course (0-based)
     room_id: str
     time_slot_id: str
+    student_group_id: str = ""  # explicit group this session is for
 
     def clone(self) -> "Gene":
-        return Gene(self.course_id, self.session_index, self.room_id, self.time_slot_id)
+        return Gene(self.course_id, self.session_index, self.room_id, self.time_slot_id, self.student_group_id)
 
 
 @dataclass

@@ -34,6 +34,7 @@ const router = createRouter({
         { path: "resources/rooms", name: "rooms", component: () => import("@/views/resources/RoomsView.vue") },
         { path: "resources/lecturers", name: "lecturers", component: () => import("@/views/resources/LecturersView.vue") },
         { path: "resources/courses", name: "courses", component: () => import("@/views/resources/CoursesView.vue") },
+        { path: "resources/assignments", name: "assignments", component: () => import("@/views/resources/AssignmentsView.vue") },
         { path: "resources/constraints", name: "constraints", component: () => import("@/views/resources/ConstraintsView.vue") },
         { path: "resources/time-slots", name: "time-slots", component: () => import("@/views/resources/TimeSlotsView.vue"), meta: { roles: ["admin", "timetable_officer"] } },
         { path: "ai-assistant", name: "ai-assistant", component: () => import("@/views/AIAssistantView.vue") },

@@ -82,6 +82,8 @@ export const timetableApi = {
     api.patch(`/timetable/entries/${entryId}`, { time_slot_id }),
   toggleLock: (timetableId, entryId) =>
     api.patch(`/timetable/${timetableId}/entries/${entryId}/lock`),
+  substituteLecturer: (timetableId, data) =>
+    api.post(`/timetable/${timetableId}/substitute-lecturer`, data),
   archive: (timetableId) => api.patch(`/timetable/${timetableId}/archive`),
   listVersions: (timetableId) => api.get(`/timetable/${timetableId}/versions`),
   createVersion: (timetableId, data) => api.post(`/timetable/${timetableId}/versions`, data),
@@ -126,6 +128,10 @@ export const resourcesApi = {
   createCourse: (data) => api.post("/courses", data),
   updateCourse: (id, data) => api.put(`/courses/${id}`, data),
   deleteCourse: (id) => api.delete(`/courses/${id}`),
+  // Course ↔ StudentGroup assignments
+  getCourseGroups: (id) => api.get(`/courses/${id}/groups`),
+  setCourseGroups: (id, groupIds) => api.post(`/courses/${id}/groups`, { group_ids: groupIds }),
+  removeCourseGroup: (courseId, groupId) => api.delete(`/courses/${courseId}/groups/${groupId}`),
   // Constraints
   constraints: (params) => api.get("/constraints", { params }),
   createConstraint: (data) => api.post("/constraints", data),

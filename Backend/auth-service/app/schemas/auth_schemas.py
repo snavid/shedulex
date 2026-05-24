@@ -11,6 +11,10 @@ class RegisterSchema(Schema):
     department = fields.Str(validate=validate.Length(max=100))
     staff_id = fields.Str(validate=validate.Length(max=50))
     role_name = fields.Str(load_default="student")
+    # University association — provide either university_id OR university_name+code to create
+    university_id = fields.Str(allow_none=True, load_default=None)
+    university_name = fields.Str(validate=validate.Length(max=200), load_default=None)
+    university_code = fields.Str(validate=validate.Length(max=20), load_default=None)
 
     @validates("password")
     def validate_password(self, value):
