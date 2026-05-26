@@ -15,16 +15,19 @@ WRITE_ROLES = ("admin", "timetable_officer", "hod")
 @calendar_bp.get("/events")
 @jwt_required()
 def list_events():
+    claims = get_jwt()
+    university_id = claims.get("university_id")
     start = request.args.get("start")
     end = request.args.get("end")
     event_type = request.args.get("type")
     dept = request.args.get("department_id")
-    university_id = request.args.get("university_id")
     program_id = request.args.get("program_id")
     student_group_id = request.args.get("student_group_id")
     include_cancelled = request.args.get("include_cancelled", "false").lower() == "true"
 
     q = AcademicEvent.query
+    if university_id:
+        q = q.filter_by(university_id=university_id)
     if start:
         q = q.filter(AcademicEvent.start_datetime >= datetime.fromisoformat(start))
     if end:
@@ -33,8 +36,6 @@ def list_events():
         q = q.filter_by(event_type=event_type)
     if dept:
         q = q.filter_by(department_id=dept)
-    if university_id:
-        q = q.filter_by(university_id=university_id)
     if program_id:
         q = q.filter_by(program_id=program_id)
     if student_group_id:
@@ -73,7 +74,7 @@ def create_event():
         is_public=body.get("is_public", True),
         color=body.get("color", "#3B82F6"),
         recurrence=body.get("recurrence", "none"),
-        university_id=body.get("university_id"),
+        university_id=claims.get("university_id"),
         student_group_id=body.get("student_group_id"),
         program_id=body.get("program_id"),
         affects_timetable=affects_timetable,
@@ -91,6 +92,9 @@ def update_event(event_id):
     if claims.get("role") not in WRITE_ROLES:
         return jsonify({"success": False, "message": "Forbidden."}), 403
     evt = AcademicEvent.query.get_or_404(event_id)
+    uni_id = claims.get("university_id")
+    if uni_id and evt.university_id != uni_id:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
     body = request.get_json() or {}
     for k in ("title", "description", "event_type", "location", "color",
               "recurrence", "is_public", "affects_timetable", "timetable_scope"):
@@ -111,6 +115,9 @@ def cancel_event(event_id):
     if claims.get("role") not in WRITE_ROLES:
         return jsonify({"success": False, "message": "Forbidden."}), 403
     evt = AcademicEvent.query.get_or_404(event_id)
+    uni_id = claims.get("university_id")
+    if uni_id and evt.university_id != uni_id:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
     body = request.get_json() or {}
     evt.is_cancelled = True
     evt.cancelled_by = get_jwt_identity()
@@ -126,6 +133,9 @@ def uncancel_event(event_id):
     if claims.get("role") not in WRITE_ROLES:
         return jsonify({"success": False, "message": "Forbidden."}), 403
     evt = AcademicEvent.query.get_or_404(event_id)
+    uni_id = claims.get("university_id")
+    if uni_id and evt.university_id != uni_id:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
     evt.is_cancelled = False
     evt.cancelled_by = None
     evt.cancellation_reason = None
@@ -140,6 +150,9 @@ def delete_event(event_id):
     if claims.get("role") not in WRITE_ROLES:
         return jsonify({"success": False, "message": "Forbidden."}), 403
     evt = AcademicEvent.query.get_or_404(event_id)
+    uni_id = claims.get("university_id")
+    if uni_id and evt.university_id != uni_id:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
     db.session.delete(evt)
     db.session.commit()
     return jsonify({"success": True, "message": "Deleted."}), 200
@@ -183,7 +196,11 @@ def affected_sessions(event_id):
 @jwt_required()
 def export_ics():
     from icalendar import Calendar, Event as ICSEvent
-    events = AcademicEvent.query.filter_by(is_public=True, is_cancelled=False).all()
+    uni_id = get_jwt().get("university_id")
+    q = AcademicEvent.query.filter_by(is_public=True, is_cancelled=False)
+    if uni_id:
+        q = q.filter_by(university_id=uni_id)
+    events = q.all()
     cal = Calendar()
     cal.add("prodid", "-//Shedulex//Academic Calendar//EN")
     cal.add("version", "2.0")
@@ -210,7 +227,7 @@ def export_ics():
 @calendar_bp.get("/semesters")
 @jwt_required()
 def list_semesters():
-    university_id = request.args.get("university_id")
+    university_id = get_jwt().get("university_id")
     q = AcademicSemester.query
     if university_id:
         q = q.filter_by(university_id=university_id)
@@ -221,7 +238,7 @@ def list_semesters():
 @calendar_bp.get("/semesters/current")
 @jwt_required()
 def get_current_semester():
-    university_id = request.args.get("university_id")
+    university_id = get_jwt().get("university_id")
     today = date.today()
     q = AcademicSemester.query.filter(
         AcademicSemester.start_date <= today,
@@ -231,7 +248,6 @@ def get_current_semester():
         q = q.filter_by(university_id=university_id)
     sem = q.first()
     if not sem:
-        # Fall back to the explicitly marked current semester
         q2 = AcademicSemester.query.filter_by(is_current=True)
         if university_id:
             q2 = q2.filter_by(university_id=university_id)
@@ -272,7 +288,7 @@ def create_semester():
         registration_end=_parse_date("registration_end"),
         exam_start=_parse_date("exam_start"),
         exam_end=_parse_date("exam_end"),
-        university_id=body.get("university_id"),
+        university_id=claims.get("university_id"),
         timezone=body.get("timezone", "UTC"),
         is_current=body.get("is_current", False),
     )
@@ -295,6 +311,9 @@ def update_semester(sem_id):
     if claims.get("role") not in WRITE_ROLES:
         return jsonify({"success": False, "message": "Forbidden."}), 403
     sem = AcademicSemester.query.get_or_404(sem_id)
+    uni_id = claims.get("university_id")
+    if uni_id and sem.university_id != uni_id:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
     body = request.get_json() or {}
 
     for k in ("name", "academic_year", "timezone"):
@@ -336,6 +355,9 @@ def set_current_semester(sem_id):
     if claims.get("role") not in WRITE_ROLES:
         return jsonify({"success": False, "message": "Forbidden."}), 403
     sem = AcademicSemester.query.get_or_404(sem_id)
+    uni_id = claims.get("university_id")
+    if uni_id and sem.university_id != uni_id:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
     q_clear = AcademicSemester.query.filter(
         AcademicSemester.id != sem.id, AcademicSemester.is_current == True
     )
@@ -354,6 +376,9 @@ def delete_semester(sem_id):
     if claims.get("role") not in WRITE_ROLES:
         return jsonify({"success": False, "message": "Forbidden."}), 403
     sem = AcademicSemester.query.get_or_404(sem_id)
+    uni_id = claims.get("university_id")
+    if uni_id and sem.university_id != uni_id:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
     db.session.delete(sem)
     db.session.commit()
     return jsonify({"success": True, "message": "Semester deleted."}), 200
@@ -364,7 +389,7 @@ def delete_semester(sem_id):
 @calendar_bp.get("/holidays")
 @jwt_required()
 def list_holidays():
-    university_id = request.args.get("university_id")
+    university_id = get_jwt().get("university_id")
     year = request.args.get("year", type=int)
     q = AcademicHoliday.query
     if university_id:
@@ -388,7 +413,7 @@ def create_holiday():
         date=date.fromisoformat(body["date"]),
         end_date=date.fromisoformat(body["end_date"]) if body.get("end_date") else None,
         holiday_type=body.get("holiday_type", "public"),
-        university_id=body.get("university_id"),
+        university_id=claims.get("university_id"),
         country_code=body.get("country_code"),
         is_recurring=body.get("is_recurring", False),
         created_by=get_jwt_identity(),
@@ -405,6 +430,9 @@ def update_holiday(holiday_id):
     if claims.get("role") not in WRITE_ROLES:
         return jsonify({"success": False, "message": "Forbidden."}), 403
     holiday = AcademicHoliday.query.get_or_404(holiday_id)
+    uni_id = claims.get("university_id")
+    if uni_id and holiday.university_id != uni_id:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
     body = request.get_json() or {}
     for k in ("name", "holiday_type", "university_id", "country_code", "is_recurring"):
         if k in body:
@@ -424,6 +452,9 @@ def delete_holiday(holiday_id):
     if claims.get("role") not in WRITE_ROLES:
         return jsonify({"success": False, "message": "Forbidden."}), 403
     holiday = AcademicHoliday.query.get_or_404(holiday_id)
+    uni_id = claims.get("university_id")
+    if uni_id and holiday.university_id != uni_id:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
     db.session.delete(holiday)
     db.session.commit()
     return jsonify({"success": True, "message": "Holiday deleted."}), 200

@@ -169,6 +169,11 @@ function detectMoveConflicts(entry, targetDay, targetStartTime) {
 async function confirmMove() {
   moveModal.moving = true
   try {
+    // Auto-snapshot current state before the move so it can be reverted
+    await timetableApi.createVersion(route.params.id, {
+      notes: `Before move: ${moveModal.entry.course?.code} → ${moveModal.targetSlot?.day} ${moveModal.targetSlot?.start_time}`,
+    }).catch(() => {})
+
     await timetableApi.moveEntry(moveModal.entry.id, moveModal.targetSlot.id)
     toast.success(`Moved ${moveModal.entry.course?.code} → ${moveModal.targetSlot.day} ${moveModal.targetSlot.start_time}`)
     moveModal.visible = false
@@ -177,6 +182,7 @@ async function confirmMove() {
     if (tid) resourcesApi.getTemplate(tid)
       .then(({ data }) => { templateBlocks.value = data.data?.blocks || [] })
       .catch(() => {})
+    await loadVersions()
   } catch (e) {
     toast.error(getErrorMessage(e, "Failed to move session."))
   } finally {
@@ -473,9 +479,13 @@ async function restoreSnapshot(snapshotId) {
   if (!window.confirm("Restore this snapshot? Current timetable entries will be replaced.")) return
   restoringSnapshotId.value = snapshotId
   try {
-    await timetableApi.restoreVersion(snapshotId)
-    toast.success("Timetable restored from snapshot.")
-    await store.fetchTimetable(route.params.id)
+    const { data } = await timetableApi.restoreVersion(snapshotId)
+    if (data?.data) {
+      store.setCurrentTimetable(null)  // force Vue to re-render the grid from scratch
+      await Promise.resolve()          // let the DOM flush the null state
+      store.setCurrentTimetable(data.data)
+    }
+    toast.success(`Timetable restored to version ${data?.data?.version ?? '?'}.`)
     await loadVersions()
   } catch (e) {
     toast.error(getErrorMessage(e, "Could not restore version."))
@@ -564,13 +574,16 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
       <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 class="text-2xl font-bold text-gray-900">{{ store.currentTimetable.name }}</h1>
-          <p class="text-gray-500 text-sm">
+          <p class="text-gray-500 text-sm flex items-center flex-wrap gap-x-1">
             {{ store.currentTimetable.department?.name }}
             <span v-if="store.currentTimetable.program">
               · {{ store.currentTimetable.program.name }} ({{ store.currentTimetable.program.code }})
             </span>
             · Semester {{ store.currentTimetable.semester }}
             · {{ store.currentTimetable.academic_year }}
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-500 ml-1">
+              v{{ store.currentTimetable.version }}
+            </span>
           </p>
         </div>
         <div class="flex flex-wrap gap-2">
@@ -656,7 +669,7 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
       </div>
 
       <!-- Stats -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div class="card text-center">
           <p class="text-2xl font-bold text-blue-600">{{ (store.currentTimetable.fitness_score * 100).toFixed(1) }}%</p>
           <p class="text-xs text-gray-500 mt-1">Fitness Score</p>
@@ -664,6 +677,10 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
         <div class="card text-center">
           <p class="text-2xl font-bold text-gray-900">{{ store.currentTimetable.entries?.length || 0 }}</p>
           <p class="text-xs text-gray-500 mt-1">Total Sessions</p>
+        </div>
+        <div class="card text-center">
+          <p class="text-2xl font-bold text-indigo-600">v{{ store.currentTimetable.version }}</p>
+          <p class="text-xs text-gray-500 mt-1">Version</p>
         </div>
         <div class="card text-center">
           <p class="text-2xl font-bold text-gray-900">{{ store.currentTimetable.generations_run }}</p>

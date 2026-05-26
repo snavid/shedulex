@@ -1,10 +1,12 @@
 <script setup>
-import { onMounted, ref, computed } from "vue"
+import { onMounted, ref, computed, watch } from "vue"
 import { RouterLink } from "vue-router"
 import { resourcesApi, getErrorMessage } from "@/api/client"
+import { useAcademicYearStore } from "@/stores/academicYear"
 import { useToast } from "vue-toastification"
 
 const toast = useToast()
+const yearStore = useAcademicYearStore()
 const loading = ref(true)
 const saving = ref(false)
 const courses = ref([])
@@ -19,7 +21,7 @@ const deptFilter = ref("")
 
 const blank = () => ({
   name: "", code: "", department_id: "", lecturer_id: "",
-  semester: 1, year_of_study: 1, weekly_hours: 3,
+  semester: yearStore.currentSemester, year_of_study: 1, weekly_hours: 3,
   student_count: 40, requires_lab: false, priority: 1,
   student_group_ids: [],
 })
@@ -63,7 +65,7 @@ async function loadData() {
   loading.value = true
   try {
     const [courseRes, deptRes, lecRes, grpRes] = await Promise.all([
-      resourcesApi.courses(),
+      resourcesApi.courses({ semester: yearStore.currentSemester }),
       resourcesApi.departments(),
       resourcesApi.lecturers(),
       resourcesApi.studentGroups(),
@@ -78,6 +80,8 @@ async function loadData() {
     loading.value = false
   }
 }
+
+watch(() => yearStore.currentSemester, loadData)
 
 function toggleGroup(gid) {
   const idx = form.value.student_group_ids.indexOf(gid)
@@ -181,7 +185,9 @@ async function onGroupDrop(targetGroupId) {
   const { course_id, from_group_id } = draggingGroup.value
   draggingGroup.value = null
 
-  if (targetGroupId === (from_group_id ?? "unassigned")) return
+  // Normalise "unassigned" → null for comparison
+  const normTarget = targetGroupId === "unassigned" ? null : targetGroupId
+  if (normTarget === from_group_id) return   // same bucket — no-op
 
   const c = courses.value.find(x => x.id === course_id)
   if (!c) return
@@ -190,22 +196,33 @@ async function onGroupDrop(targetGroupId) {
   let updated
 
   if (targetGroupId === "unassigned") {
+    // Drag to Unassigned → remove from the specific group it was dragged FROM only.
+    // This keeps any other group memberships intact.
     updated = current.filter(id => id !== from_group_id)
-  } else if (!from_group_id) {
-    updated = [...current, targetGroupId]
   } else {
-    updated = current.filter(id => id !== from_group_id)
-    if (!updated.includes(targetGroupId)) updated.push(targetGroupId)
+    // Drag to a group bucket → ADDITIVE: add to target without removing from source.
+    // A course can belong to multiple groups at the same time.
+    if (current.includes(targetGroupId)) {
+      toast.info(`Already assigned to ${studentGroups.value.find(g => g.id === targetGroupId)?.code || "that group"}`)
+      return
+    }
+    updated = [...current, targetGroupId]
   }
 
   savingGroup.value = course_id
   try {
     await resourcesApi.setCourseGroups(course_id, updated)
-    c.student_group_ids = updated
+    // Splice to guarantee Vue 3 computed (groupedView) re-evaluates.
+    const cIdx = courses.value.findIndex(x => x.id === course_id)
+    if (cIdx !== -1) {
+      courses.value.splice(cIdx, 1, { ...courses.value[cIdx], student_group_ids: updated })
+    }
+    const targetName = studentGroups.value.find(g => g.id === targetGroupId)?.code
+    const sourceName = studentGroups.value.find(g => g.id === from_group_id)?.code
     toast.success(
       targetGroupId === "unassigned"
-        ? "Removed from group"
-        : `Assigned to ${studentGroups.value.find(g => g.id === targetGroupId)?.code || "group"}`
+        ? `Removed from ${sourceName || "group"}`
+        : `Added to ${targetName || "group"}`
     )
   } catch (e) {
     toast.error(getErrorMessage(e, "Failed to update group assignment."))
@@ -213,6 +230,32 @@ async function onGroupDrop(targetGroupId) {
   } finally {
     savingGroup.value = null
   }
+}
+
+// Remove a course from one specific group (triggered by the × chip button).
+async function removeFromGroup(course, groupId) {
+  if (savingGroup.value) return   // debounce rapid clicks
+  const current = (course.student_group_ids || []).slice()
+  const updated = current.filter(id => id !== groupId)
+  savingGroup.value = course.id
+  try {
+    await resourcesApi.removeCourseGroup(course.id, groupId)
+    const cIdx = courses.value.findIndex(x => x.id === course.id)
+    if (cIdx !== -1) {
+      courses.value.splice(cIdx, 1, { ...courses.value[cIdx], student_group_ids: updated })
+    }
+    toast.success(`Removed from ${studentGroups.value.find(g => g.id === groupId)?.code || "group"}`)
+  } catch (e) {
+    toast.error(getErrorMessage(e, "Failed to remove from group."))
+    await loadData()
+  } finally {
+    savingGroup.value = null
+  }
+}
+
+// How many OTHER groups (besides the one currently rendered) share this course.
+function sharedGroupCount(course, currentGroupId) {
+  return (course.student_group_ids || []).filter(id => id !== currentGroupId).length
 }
 
 onMounted(loadData)
@@ -536,7 +579,7 @@ onMounted(loadData)
               v-if="dragOverGroup === bucket.group.id && draggingGroup && draggingGroup.from_group_id !== bucket.group.id"
               class="text-xs text-indigo-600 font-medium text-center py-1 rounded-lg bg-indigo-100 mb-2"
             >
-              Drop to assign
+              Drop to add to group
             </div>
 
             <!-- Course chips -->
@@ -546,22 +589,44 @@ onMounted(loadData)
                 :key="c.id"
                 draggable="true"
                 @dragstart="onGroupDragStart(c, bucket.group.id)"
-                class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 cursor-grab active:cursor-grabbing select-none hover:bg-indigo-100 transition-colors"
+                class="flex items-start gap-2 px-2.5 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 cursor-grab active:cursor-grabbing select-none hover:bg-indigo-100 transition-colors"
                 :class="savingGroup === c.id ? 'opacity-50 cursor-wait' : ''"
               >
-                <span class="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></span>
+                <span class="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 mt-1"></span>
                 <div class="min-w-0 flex-1">
                   <p class="text-xs font-bold text-indigo-900 leading-tight">{{ c.code }}</p>
                   <p class="text-[11px] text-indigo-700 truncate leading-tight">{{ c.name }}</p>
+                  <!-- Badge: course is shared with other groups -->
+                  <span
+                    v-if="sharedGroupCount(c, bucket.group.id) > 0"
+                    class="inline-flex items-center gap-0.5 mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-purple-100 text-purple-700 border border-purple-200"
+                    :title="'Also in: ' + (c.student_group_ids || []).filter(id => id !== bucket.group.id).map(id => groupName(id)).join(', ')"
+                  >
+                    <svg class="w-2 h-2" fill="currentColor" viewBox="0 0 20 20"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
+                    +{{ sharedGroupCount(c, bucket.group.id) }} shared
+                  </span>
                 </div>
+                <!-- Edit button -->
                 <button
-                  class="p-0.5 text-indigo-300 hover:text-blue-600 rounded shrink-0"
+                  class="p-0.5 text-indigo-300 hover:text-blue-600 rounded shrink-0 mt-0.5"
                   @click.stop="openEdit(c)"
                   @mousedown.stop
-                  title="Edit"
+                  title="Edit course"
                 >
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+                <!-- Remove from THIS group only -->
+                <button
+                  class="p-0.5 text-indigo-200 hover:text-red-500 rounded shrink-0 mt-0.5"
+                  @click.stop="removeFromGroup(c, bucket.group.id)"
+                  @mousedown.stop
+                  :disabled="savingGroup === c.id"
+                  title="Remove from this group"
+                >
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
               </div>
@@ -591,7 +656,7 @@ onMounted(loadData)
           @drop.prevent="onGroupDrop('unassigned')"
         >
           <p v-if="dragOverGroup === 'unassigned'" class="text-xs text-amber-600 font-medium text-center py-1 rounded-lg bg-amber-100">
-            Drop to remove from group
+            Drop to remove from that group
           </p>
 
           <template v-if="groupedView.unassigned.length">

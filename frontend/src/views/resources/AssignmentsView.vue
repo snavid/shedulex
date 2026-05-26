@@ -8,19 +8,21 @@
  * Drag a course chip from anywhere → drop onto a lecturer card or the pool to
  * (re)assign or unassign it.  Changes are persisted immediately via PATCH /courses/<id>.
  */
-import { onMounted, ref, computed } from "vue"
+import { onMounted, ref, computed, watch } from "vue"
 import { resourcesApi } from "@/api/client"
 import { useAuthStore } from "@/stores/auth"
+import { useAcademicYearStore } from "@/stores/academicYear"
 import { useToast } from "vue-toastification"
 
-const auth  = useAuthStore()
-const toast = useToast()
+const auth      = useAuthStore()
+const yearStore = useAcademicYearStore()
+const toast     = useToast()
 
-const loading    = ref(true)
-const saving     = ref(null)   // course_id being saved
-const lecturers  = ref([])
-const courses    = ref([])
-const search     = ref("")
+const loading = ref(true)
+const saving  = ref(null)
+const lecturers = ref([])
+const courses   = ref([])
+const search    = ref("")
 
 const canManage = computed(() =>
   ["admin", "timetable_officer", "hod"].includes(auth.user?.role?.name)
@@ -31,7 +33,7 @@ async function loadData() {
   try {
     const [lecRes, crsRes] = await Promise.all([
       resourcesApi.lecturers(),
-      resourcesApi.courses(),
+      resourcesApi.courses({ semester: yearStore.currentSemester }),
     ])
     lecturers.value = lecRes.data.data || []
     courses.value   = crsRes.data.data || []
@@ -39,6 +41,8 @@ async function loadData() {
     loading.value = false
   }
 }
+
+watch(() => yearStore.currentSemester, loadData)
 
 // ── Drag state ────────────────────────────────────────────────────────────────
 const dragging   = ref(null)   // { course_id, from_lecturer_id | null }
@@ -124,7 +128,9 @@ onMounted(loadData)
       <div>
         <h1 class="text-2xl font-bold text-gray-900">Lecturer-Course Assignments</h1>
         <p class="text-sm text-gray-500 mt-1">
-          Drag courses onto a lecturer to assign them. Unassigned courses cannot be scheduled by the GA.
+          Drag courses onto a lecturer to assign them — showing
+          <span class="font-semibold text-blue-600">Semester {{ yearStore.currentSemester }}</span> courses.
+          Switch semester from the top bar.
         </p>
       </div>
       <input v-model="search" class="input max-w-xs" placeholder="Search courses…" />

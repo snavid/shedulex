@@ -94,6 +94,9 @@ class University(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     departments = db.relationship("Department", back_populates="university", cascade="all, delete-orphan")
+    academic_years = db.relationship("AcademicYear", back_populates="university",
+                                     cascade="all, delete-orphan",
+                                     order_by="AcademicYear.name.desc()")
 
     def to_dict(self):
         return {
@@ -104,6 +107,49 @@ class University(db.Model):
             "website": self.website,
             "logo_url": self.logo_url,
             "is_active": self.is_active,
+        }
+
+
+class AcademicYear(db.Model):
+    """
+    Workspace / academic-year container — e.g. "2025-2026".
+    Timetables are scoped to a year; structural data (rooms, lecturers, time slots,
+    departments) is shared across years so nothing needs to be re-entered.
+    Semester date ranges here drive the calendar integration.
+    """
+    __tablename__ = "academic_years"
+
+    id          = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name        = db.Column(db.String(20), nullable=False)          # "2025-2026"
+    university_id = db.Column(db.String(36), db.ForeignKey("universities.id"), nullable=False)
+    # Semester 1 date window
+    sem1_start  = db.Column(db.Date)
+    sem1_end    = db.Column(db.Date)
+    # Semester 2 date window
+    sem2_start  = db.Column(db.Date)
+    sem2_end    = db.Column(db.Date)
+    is_current  = db.Column(db.Boolean, default=False)
+    status      = db.Column(db.String(20), default="active")        # active | archived
+    created_at  = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    university = db.relationship("University", back_populates="academic_years")
+    timetables = db.relationship("Timetable", back_populates="year", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        db.UniqueConstraint("name", "university_id", name="uq_academic_year_uni"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "university_id": self.university_id,
+            "sem1_start": self.sem1_start.isoformat() if self.sem1_start else None,
+            "sem1_end":   self.sem1_end.isoformat()   if self.sem1_end   else None,
+            "sem2_start": self.sem2_start.isoformat() if self.sem2_start else None,
+            "sem2_end":   self.sem2_end.isoformat()   if self.sem2_end   else None,
+            "is_current": self.is_current,
+            "status":     self.status,
         }
 
 
@@ -223,6 +269,7 @@ class Room(db.Model):
     has_projector = db.Column(db.Boolean, default=True)
     has_lab_equipment = db.Column(db.Boolean, default=False)
     is_available = db.Column(db.Boolean, default=True)
+    university_id = db.Column(db.String(36), db.ForeignKey("universities.id"), nullable=True, index=True)
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
@@ -231,7 +278,7 @@ class Room(db.Model):
             "capacity": self.capacity, "room_type": self.room_type,
             "building": self.building, "floor": self.floor,
             "has_projector": self.has_projector, "has_lab_equipment": self.has_lab_equipment,
-            "is_available": self.is_available,
+            "is_available": self.is_available, "university_id": self.university_id,
         }
 
 
@@ -357,6 +404,7 @@ class Timetable(db.Model):
     department_id = db.Column(db.String(36), db.ForeignKey("departments.id"))
     program_id = db.Column(db.String(36), db.ForeignKey("programs.id"))
     template_id = db.Column(db.String(36), db.ForeignKey("timetable_templates.id"))
+    academic_year_id = db.Column(db.String(36), db.ForeignKey("academic_years.id"))
     # References academic_semesters.id in calendar-service (soft ref, no FK across services)
     calendar_semester_id = db.Column(db.String(36))
     status = db.Column(db.String(30), default="draft")  # draft, generating, active, archived
@@ -375,6 +423,7 @@ class Timetable(db.Model):
     department = db.relationship("Department")
     program = db.relationship("Program", back_populates="timetables")
     template = db.relationship("TimetableTemplate")
+    year = db.relationship("AcademicYear", back_populates="timetables")
 
     def to_dict(self, include_entries=False):
         d = {
@@ -385,6 +434,8 @@ class Timetable(db.Model):
             "generations_run": self.generations_run,
             "template_id": self.template_id,
             "template": self.template.to_dict() if self.template else None,
+            "academic_year_id": self.academic_year_id,
+            "academic_year_obj": self.year.to_dict() if self.year else None,
             "calendar_semester_id": self.calendar_semester_id,
             "violation_report": self.violation_report or [],
             "department": self.department.to_dict() if self.department else None,

@@ -65,16 +65,59 @@ const COUNTRIES = [
 
 // ── Modals ─────────────────────────────────────────────────────────────────────
 const showCreateModal    = ref(false)
+const showEditModal      = ref(false)
 const showDetailModal    = ref(false)
 const showSemesterModal  = ref(false)
+const showAllEventsModal = ref(false)
 const showSidebar        = ref(true)
 const selectedEvent      = ref(null)
 const showReminderForm   = ref(false)
 const showCancelForm     = ref(false)
 const saving             = ref(false)
+const updating           = ref(false)
 const sendingReminder    = ref(false)
 const deleting           = ref(false)
 const cancelling         = ref(false)
+
+// ── All Events list state ──────────────────────────────────────────────────────
+const eventsSearch    = ref("")
+const eventsTypeFilter = ref("all")
+const deletingId      = ref(null)
+
+const filteredEvents = computed(() => {
+  let list = [...academicEvents.value]
+  if (eventsTypeFilter.value !== "all") list = list.filter(e => e.event_type === eventsTypeFilter.value)
+  if (eventsSearch.value.trim()) {
+    const q = eventsSearch.value.toLowerCase()
+    list = list.filter(e => e.title.toLowerCase().includes(q) || (e.description || "").toLowerCase().includes(q))
+  }
+  return list.sort((a, b) => new Date(a.start) - new Date(b.start))
+})
+
+async function deleteEventById(id) {
+  if (!window.confirm("Permanently delete this event?")) return
+  deletingId.value = id
+  try {
+    await calendarApi.deleteEvent(id)
+    toast.success("Event deleted.")
+    await loadAcademicEvents()
+  } catch (e) {
+    toast.error(getErrorMessage(e, "Failed to delete event."))
+  } finally { deletingId.value = null }
+}
+
+function openEditFromList(evt) {
+  selectedEvent.value = { id: evt.id, ...evt }
+  openEditEvent()
+  showAllEventsModal.value = false
+}
+
+const editEventForm = reactive({
+  title: "", description: "", event_type: "event",
+  start: "", end: "", location: "", all_day: false,
+  color: "#10B981", is_public: true,
+  affects_timetable: false, timetable_scope: "",
+})
 
 // ── Semester form ──────────────────────────────────────────────────────────────
 const editingSemester = ref(null)
@@ -602,6 +645,42 @@ async function deleteSelectedEvent() {
   } finally { deleting.value = false }
 }
 
+function openEditEvent() {
+  const evt = selectedEvent.value
+  Object.assign(editEventForm, {
+    title: evt.title || "",
+    description: evt.description || "",
+    event_type: evt.event_type || "event",
+    start: evt.start ? new Date(evt.start).toISOString().slice(0, 16) : "",
+    end: evt.end ? new Date(evt.end).toISOString().slice(0, 16) : "",
+    location: evt.location || "",
+    all_day: evt.allDay || evt.all_day || false,
+    color: evt.color || "#10B981",
+    is_public: evt.is_public !== undefined ? evt.is_public : true,
+    affects_timetable: evt.affects_timetable || false,
+    timetable_scope: evt.timetable_scope || "",
+  })
+  showDetailModal.value = false
+  showEditModal.value = true
+}
+
+async function updateEvent() {
+  if (!editEventForm.title || !editEventForm.start) {
+    toast.error("Title and start date are required.")
+    return
+  }
+  updating.value = true
+  try {
+    await calendarApi.updateEvent(selectedEvent.value.id, { ...editEventForm })
+    toast.success("Event updated.")
+    showEditModal.value = false
+    selectedEvent.value = null
+    await loadAcademicEvents()
+  } catch (e) {
+    toast.error(getErrorMessage(e, "Failed to update event."))
+  } finally { updating.value = false }
+}
+
 async function sendReminder() {
   sendingReminder.value = true
   try {
@@ -699,6 +778,9 @@ onMounted(async () => {
           {{ showSidebar ? "Hide" : "Show" }} Panel
         </button>
         <a :href="calendarApi.exportIcs()" target="_blank" class="btn-secondary text-sm">Export ICS</a>
+        <button class="btn-secondary text-sm" @click="showAllEventsModal = true">
+          View All Events
+        </button>
         <button v-if="canManage" class="btn-primary text-sm" @click="showCreateModal = true">
           + Create Event
         </button>
@@ -1207,6 +1289,11 @@ onMounted(async () => {
                 🔔 Remind Me
               </button>
               <template v-if="canManage && isCalendarSource">
+                <button
+                  class="btn-secondary text-sm text-blue-600 border-blue-200 hover:bg-blue-50"
+                  @click="openEditEvent">
+                  Edit Event
+                </button>
                 <button v-if="!selectedEvent.is_cancelled"
                   class="btn-secondary text-sm text-orange-600 border-orange-200 hover:bg-orange-50"
                   @click="showCancelForm = true">
@@ -1226,6 +1313,166 @@ onMounted(async () => {
         </div>
       </div>
     </Teleport>
+    <!-- ── All Events Modal ─────────────────────────────────────────────── -->
+    <Teleport to="body">
+      <div v-if="showAllEventsModal" class="modal-backdrop" @click.self="showAllEventsModal = false">
+        <div class="modal-box w-full max-w-3xl flex flex-col" style="max-height: 85vh;">
+          <!-- Header -->
+          <div class="modal-header flex-shrink-0">
+            <div>
+              <h2 class="text-lg font-bold text-gray-900">All Academic Events</h2>
+              <p class="text-xs text-gray-400 mt-0.5">{{ filteredEvents.length }} event{{ filteredEvents.length !== 1 ? "s" : "" }}</p>
+            </div>
+            <button class="modal-close" @click="showAllEventsModal = false">✕</button>
+          </div>
+
+          <!-- Search + Filter bar -->
+          <div class="px-5 pt-3 pb-2 flex flex-wrap gap-2 border-b border-gray-100 flex-shrink-0">
+            <input
+              v-model="eventsSearch"
+              class="input flex-1 min-w-[160px] text-sm"
+              placeholder="Search by title or description…"
+            />
+            <select v-model="eventsTypeFilter" class="input !w-auto text-sm">
+              <option value="all">All types</option>
+              <option v-for="(cfg, type) in EVENT_TYPES" :key="type" :value="type">{{ cfg.label }}</option>
+            </select>
+            <button v-if="canManage" class="btn-primary text-sm flex-shrink-0"
+              @click="showAllEventsModal = false; showCreateModal = true">
+              + New Event
+            </button>
+          </div>
+
+          <!-- Events list -->
+          <div class="flex-1 overflow-y-auto modal-body !pt-2 space-y-2">
+            <div v-if="!filteredEvents.length" class="text-center py-12 text-gray-400 text-sm">
+              No events found.
+            </div>
+
+            <div
+              v-for="evt in filteredEvents"
+              :key="evt.id"
+              class="flex items-start gap-3 p-3 rounded-xl border transition-colors"
+              :class="evt.is_cancelled ? 'border-gray-100 bg-gray-50 opacity-60' : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'"
+            >
+              <!-- Type dot -->
+              <div
+                class="w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0"
+                :style="{ backgroundColor: EVENT_TYPES[evt.event_type]?.color || '#6B7280' }"
+              ></div>
+
+              <!-- Info -->
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <p class="font-semibold text-gray-900 text-sm" :class="{ 'line-through text-gray-400': evt.is_cancelled }">
+                    {{ evt.title }}
+                  </p>
+                  <span
+                    class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold capitalize"
+                    :style="{ backgroundColor: (EVENT_TYPES[evt.event_type]?.color || '#6B7280') + '20', color: EVENT_TYPES[evt.event_type]?.color || '#6B7280' }"
+                  >{{ (EVENT_TYPES[evt.event_type]?.label || evt.event_type) }}</span>
+                  <span v-if="evt.is_cancelled" class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500 font-semibold">CANCELLED</span>
+                  <span v-if="evt.affects_timetable" class="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-semibold">⚡ TIMETABLE</span>
+                </div>
+                <p class="text-xs text-gray-500 mt-0.5">
+                  {{ formatDate(evt.start) }}
+                  <span v-if="evt.end"> → {{ formatDate(evt.end) }}</span>
+                  <span v-if="evt.location" class="ml-2 text-gray-400">📍 {{ evt.location }}</span>
+                </p>
+                <p v-if="evt.description" class="text-xs text-gray-400 mt-0.5 truncate">{{ evt.description }}</p>
+              </div>
+
+              <!-- Actions (admin/officer only) -->
+              <div v-if="canManage" class="flex items-center gap-1 flex-shrink-0">
+                <button
+                  class="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-blue-600 hover:bg-blue-50 transition-colors border border-blue-100"
+                  @click="openEditFromList(evt)"
+                >Edit</button>
+                <button
+                  class="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-50 transition-colors border border-red-100"
+                  :disabled="deletingId === evt.id"
+                  @click="deleteEventById(evt.id)"
+                >{{ deletingId === evt.id ? "…" : "Delete" }}</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div class="modal-footer flex-shrink-0">
+            <button class="btn-secondary" @click="showAllEventsModal = false">Close</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- ── Edit Event Modal ──────────────────────────────────────────────── -->
+    <Teleport to="body">
+      <div v-if="showEditModal" class="modal-backdrop" @click.self="showEditModal = false">
+        <div class="modal-box w-full max-w-lg">
+          <div class="modal-header">
+            <h2 class="text-lg font-bold text-gray-900">Edit Event</h2>
+            <button class="modal-close" @click="showEditModal = false">✕</button>
+          </div>
+          <div class="modal-body space-y-3">
+            <div>
+              <label class="label">Event Title</label>
+              <input v-model="editEventForm.title" class="input" placeholder="e.g. Mid-semester Exam"/>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="label">Type</label>
+                <select v-model="editEventForm.event_type" class="input">
+                  <option v-for="(cfg, type) in EVENT_TYPES" :key="type" :value="type">{{ cfg.label }}</option>
+                </select>
+              </div>
+              <div>
+                <label class="label">Location</label>
+                <input v-model="editEventForm.location" class="input" placeholder="Room / Online"/>
+              </div>
+              <div>
+                <label class="label">Start</label>
+                <input v-model="editEventForm.start" type="datetime-local" class="input"/>
+              </div>
+              <div>
+                <label class="label">End</label>
+                <input v-model="editEventForm.end" type="datetime-local" class="input"/>
+              </div>
+            </div>
+            <div>
+              <label class="label">Description</label>
+              <textarea v-model="editEventForm.description" rows="3" class="input" placeholder="Optional…"></textarea>
+            </div>
+            <div class="flex flex-wrap items-center gap-4">
+              <label class="flex items-center gap-2 text-sm cursor-pointer">
+                <input v-model="editEventForm.all_day" type="checkbox" class="rounded text-blue-600"/>
+                All-day event
+              </label>
+              <label class="flex items-center gap-2 text-sm cursor-pointer">
+                <input v-model="editEventForm.is_public" type="checkbox" class="rounded text-blue-600"/>
+                Public
+              </label>
+              <label class="flex items-center gap-2 text-sm cursor-pointer"
+                title="Sessions on this day will appear faded (affected by this event)">
+                <input v-model="editEventForm.affects_timetable" type="checkbox" class="rounded text-purple-600"/>
+                <span class="text-purple-700 font-medium">Affects timetable</span>
+              </label>
+            </div>
+            <div v-if="editEventForm.affects_timetable">
+              <label class="label">Timetable Scope</label>
+              <input v-model="editEventForm.timetable_scope" class="input text-sm"
+                placeholder="all · department · program · student_group"/>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" @click="showEditModal = false">Cancel</button>
+            <button class="btn-primary" :disabled="updating" @click="updateEvent">
+              {{ updating ? "Saving…" : "Save Changes" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
   </div>
 </template>
 

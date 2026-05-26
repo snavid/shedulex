@@ -81,7 +81,14 @@ def seed_roles():
     db.session.commit()
 
 
-def register_user(data: dict) -> tuple[User, dict]:
+SELF_APPROVE_ROLES = {"admin"}
+
+
+def register_user(data: dict) -> tuple[User, dict | None]:
+    """
+    Returns (user, tokens) for admin registrations (immediate access) or
+    (user, None) for all other roles (pending admin approval).
+    """
     role_name = data.pop("role_name", "student")
     role = Role.query.filter_by(name=role_name).first()
     if not role:
@@ -98,6 +105,9 @@ def register_user(data: dict) -> tuple[User, dict]:
         data.get("university_code"),
     )
 
+    # Admins creating their own university account are immediately active and approved.
+    # All other self-registrations require admin approval before the account can be used.
+    self_approve = role.name in SELF_APPROVE_ROLES
     verification_token = secrets.token_urlsafe(32)
     user = User(
         email=data["email"],
@@ -109,6 +119,8 @@ def register_user(data: dict) -> tuple[User, dict]:
         staff_id=data.get("staff_id"),
         university_id=university_id,
         role_id=role.id,
+        is_active=self_approve,
+        is_approved=self_approve,
         verification_token=verification_token,
     )
     user.set_password(data["password"])
@@ -119,6 +131,9 @@ def register_user(data: dict) -> tuple[User, dict]:
         send_verification_email(user.email, user.first_name, verification_token)
     except Exception:
         current_app.logger.warning("Verification email failed to send.")
+
+    if not self_approve:
+        return user, None  # pending approval — no tokens issued
 
     tokens = generate_tokens(user.id, {
         "role": role.name,
@@ -133,8 +148,10 @@ def login_user(email: str, password: str) -> tuple[User, dict]:
     user = User.query.filter_by(email=email).first()
     if not user or not user.check_password(password):
         raise ValueError("Invalid email or password.")
+    if not user.is_approved:
+        raise PermissionError("Your account is pending admin approval. Please wait for an administrator to activate your account.")
     if not user.is_active:
-        raise PermissionError("This account has been deactivated.")
+        raise PermissionError("This account has been deactivated. Please contact your administrator.")
 
     user.last_login = datetime.now(timezone.utc)
     db.session.commit()

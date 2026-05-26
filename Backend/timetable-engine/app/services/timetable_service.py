@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.extensions import db
 from app.models.domain import (
-    Constraint, Course, Lecturer, Program, Room, StudentGroup,
+    Constraint, Course, Department, Lecturer, Program, Room, StudentGroup,
     TimeSlot, Timetable, TimetableEntry, TimetableSnapshot, TimetableTemplate,
 )
 from app.ga import run_ga, GAConfig
@@ -23,6 +23,7 @@ def generate_timetable(
     program_id: str | None = None,
     template_id: str | None = None,
     calendar_semester_id: str | None = None,
+    academic_year_id: str | None = None,
     config_overrides: dict | None = None,
 ) -> Timetable:
     """
@@ -133,6 +134,7 @@ def generate_timetable(
         name=name,
         semester=semester,
         academic_year=academic_year,
+        academic_year_id=academic_year_id,
         department_id=department_id,
         program_id=program_id,
         template_id=template_id,
@@ -227,20 +229,27 @@ def list_timetables(
     semester: int = None,
     status: str = None,
     program_id: str = None,
+    academic_year_id: str = None,
+    university_id: str = None,
 ):
     q = Timetable.query.options(
         joinedload(Timetable.department),
         joinedload(Timetable.program),
         joinedload(Timetable.template),
+        joinedload(Timetable.year),
     )
     if department_id:
         q = q.filter_by(department_id=department_id)
     if program_id:
         q = q.filter_by(program_id=program_id)
+    if academic_year_id:
+        q = q.filter_by(academic_year_id=academic_year_id)
     if semester:
         q = q.filter_by(semester=semester)
     if status:
         q = q.filter_by(status=status)
+    if university_id:
+        q = q.join(Timetable.department).filter(Department.university_id == university_id)
     return q.order_by(Timetable.created_at.desc()).all()
 
 

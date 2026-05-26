@@ -16,16 +16,24 @@ update_schema = UserUpdateSchema()
 @jwt_required()
 @roles_required("admin", "timetable_officer")
 def list_users():
+    claims = get_jwt()
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("per_page", 20, type=int)
     role_filter = request.args.get("role")
     search = request.args.get("search", "")
+    pending_only = request.args.get("pending") == "true"
 
     query = User.query
+    # Scope to the requester's university
+    uni_id = claims.get("university_id")
+    if uni_id:
+        query = query.filter_by(university_id=uni_id)
     if role_filter:
         role = Role.query.filter_by(name=role_filter).first()
         if role:
             query = query.filter_by(role_id=role.id)
+    if pending_only:
+        query = query.filter_by(is_approved=False)
     if search:
         query = query.filter(
             User.email.ilike(f"%{search}%") | User.username.ilike(f"%{search}%")
@@ -91,6 +99,43 @@ def toggle_activation(user_id):
     db.session.commit()
     status = "activated" if user.is_active else "deactivated"
     return jsonify({"success": True, "message": f"User {status}.", "data": user.to_dict()}), 200
+
+
+@users_bp.patch("/<user_id>/approve")
+@jwt_required()
+@roles_required("admin")
+def approve_user(user_id):
+    """Approve a pending registration, activating the account."""
+    claims = get_jwt()
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"success": False, "message": "User not found."}), 404
+    # University isolation: admin can only approve users from their own university
+    uni_id = claims.get("university_id")
+    if uni_id and user.university_id != uni_id:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
+    user.is_approved = True
+    user.is_active = True
+    db.session.commit()
+    return jsonify({"success": True, "message": "User approved and activated.", "data": user.to_dict()}), 200
+
+
+@users_bp.patch("/<user_id>/reject")
+@jwt_required()
+@roles_required("admin")
+def reject_user(user_id):
+    """Reject (permanently deactivate) a pending registration."""
+    claims = get_jwt()
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"success": False, "message": "User not found."}), 404
+    uni_id = claims.get("university_id")
+    if uni_id and user.university_id != uni_id:
+        return jsonify({"success": False, "message": "Forbidden."}), 403
+    user.is_approved = False
+    user.is_active = False
+    db.session.commit()
+    return jsonify({"success": True, "message": "Registration rejected.", "data": user.to_dict()}), 200
 
 
 @users_bp.patch("/<user_id>/role")

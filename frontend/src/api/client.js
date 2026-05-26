@@ -232,9 +232,19 @@ export const usersApi = {
   update: (id, data) => api.patch(`/users/${id}`, data),
   toggleActivation: (id) => api.patch(`/users/${id}/activate`),
   changeRole: (id, role_name) => api.patch(`/users/${id}/role`, { role_name }),
+  approveUser: (id) => api.patch(`/users/${id}/approve`),
+  rejectUser: (id) => api.patch(`/users/${id}/reject`),
   roles: () => api.get("/users/roles/all"),
   createLecturer: (data) => api.post("/users/lecturers", data),
   resendCredentials: (id) => api.post(`/users/${id}/resend-credentials`),
+}
+
+export const academicYearsApi = {
+  list: (params) => api.get("/academic-years", { params }),
+  create: (data) => api.post("/academic-years", data),
+  update: (id, data) => api.put(`/academic-years/${id}`, data),
+  activate: (id) => api.post(`/academic-years/${id}/activate`),
+  delete: (id) => api.delete(`/academic-years/${id}`),
 }
 
 export const auditApi = {

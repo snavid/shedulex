@@ -2,10 +2,12 @@
 import { ref, onMounted, onBeforeUnmount, computed, watch } from "vue"
 import { useRouter } from "vue-router"
 import { useTimetableStore } from "@/stores/timetable"
+import { useAcademicYearStore } from "@/stores/academicYear"
 import { resourcesApi, calendarApi, timetableApi, getErrorMessage } from "@/api/client"
 import { useToast } from "vue-toastification"
 
 const store = useTimetableStore()
+const yearStore = useAcademicYearStore()
 const router = useRouter()
 const toast = useToast()
 
@@ -22,7 +24,8 @@ const form = ref({
   template_id: "",
   calendar_semester_id: "",
   semester: 1,
-  academic_year: new Date().getFullYear() + "/" + (new Date().getFullYear() + 1),
+  academic_year: "",
+  academic_year_id: "",
   ga_config: {
     population_size: 100,
     max_generations: 300,
@@ -52,12 +55,24 @@ const filteredPrograms = computed(() =>
     : programs.value
 )
 
+// Sync academic year from store whenever it changes
+watch(
+  () => yearStore.currentYear,
+  (yr) => {
+    if (yr) {
+      form.value.academic_year = yr.name
+      form.value.academic_year_id = yr.id
+    }
+  },
+  { immediate: true },
+)
+
 // Auto-populate semester from selected calendar semester
 watch(() => form.value.calendar_semester_id, (id) => {
   const sem = semesters.value.find(s => s.id === id)
   if (sem) {
     form.value.semester = sem.semester_number
-    form.value.academic_year = sem.academic_year
+    if (!yearStore.currentYear) form.value.academic_year = sem.academic_year
   }
 })
 watch(() => form.value.department_id, () => { form.value.program_id = "" })
@@ -120,6 +135,7 @@ async function generate() {
       calendar_semester_id: form.value.calendar_semester_id || undefined,
       semester: form.value.semester,
       academic_year: form.value.academic_year,
+      academic_year_id: form.value.academic_year_id || undefined,
       ga_config: form.value.ga_config,
     }
     const tt = await store.generateTimetable(payload)
@@ -222,6 +238,63 @@ function viewTimetable() {
 
     <!-- ── Generation form ── -->
     <form v-else @submit.prevent="generate" class="space-y-6">
+
+      <!-- Academic Year + Semester Banner -->
+      <div class="card bg-gradient-to-r from-blue-600 to-indigo-700 text-white space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-blue-200 text-xs font-semibold uppercase tracking-wider mb-0.5">Academic Year Workspace</p>
+            <p class="text-xl font-bold">{{ form.academic_year || "No year selected" }}</p>
+          </div>
+          <RouterLink v-if="!yearStore.currentYear" to="/resources/universities"
+            class="text-xs bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition-colors">
+            Configure years →
+          </RouterLink>
+          <span v-else class="text-xs bg-white/20 px-3 py-1.5 rounded-lg">
+            {{ yearStore.years.length }} year{{ yearStore.years.length !== 1 ? "s" : "" }} available
+          </span>
+        </div>
+
+        <!-- Semester picker -->
+        <div>
+          <p class="text-blue-200 text-xs font-semibold uppercase tracking-wider mb-2">Semester</p>
+          <div class="flex gap-2">
+            <button
+              type="button"
+              @click="form.semester = 1"
+              :class="[
+                'flex-1 py-2.5 rounded-xl font-semibold text-sm transition-all border-2',
+                form.semester === 1
+                  ? 'bg-white text-blue-700 border-white shadow-lg'
+                  : 'bg-white/10 text-white border-white/30 hover:bg-white/20',
+              ]"
+            >
+              <div class="text-base mb-0.5">📘</div>
+              Semester 1
+              <div v-if="yearStore.currentYear?.sem1_start" class="text-xs opacity-75 font-normal mt-0.5">
+                {{ yearStore.currentYear.sem1_start }} – {{ yearStore.currentYear.sem1_end }}
+              </div>
+            </button>
+            <button
+              type="button"
+              @click="form.semester = 2"
+              :class="[
+                'flex-1 py-2.5 rounded-xl font-semibold text-sm transition-all border-2',
+                form.semester === 2
+                  ? 'bg-white text-blue-700 border-white shadow-lg'
+                  : 'bg-white/10 text-white border-white/30 hover:bg-white/20',
+              ]"
+            >
+              <div class="text-base mb-0.5">📗</div>
+              Semester 2
+              <div v-if="yearStore.currentYear?.sem2_start" class="text-xs opacity-75 font-normal mt-0.5">
+                {{ yearStore.currentYear.sem2_start }} – {{ yearStore.currentYear.sem2_end }}
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Basic config -->
       <div class="card space-y-4">
         <h2 class="font-semibold text-gray-900 text-lg">Basic Configuration</h2>
@@ -251,9 +324,9 @@ function viewTimetable() {
 
         <div class="grid grid-cols-2 gap-4">
           <div>
-            <label class="label">Academic Semester</label>
+            <label class="label">Calendar Semester <span class="text-xs text-gray-400">(optional)</span></label>
             <select v-model="form.calendar_semester_id" class="input">
-              <option value="">Manual entry below</option>
+              <option value="">None — use semester {{ form.semester }} above</option>
               <option v-for="s in semesters" :key="s.id" :value="s.id">
                 {{ s.name }} ({{ s.academic_year }}) {{ s.is_current ? "· Current" : "" }}
               </option>
@@ -267,20 +340,6 @@ function viewTimetable() {
                 {{ t.name }}{{ t.is_default ? " (default)" : "" }}
               </option>
             </select>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-4" v-if="!form.calendar_semester_id">
-          <div>
-            <label class="label">Semester Number</label>
-            <select v-model="form.semester" class="input">
-              <option :value="1">Semester 1</option>
-              <option :value="2">Semester 2</option>
-            </select>
-          </div>
-          <div>
-            <label class="label">Academic Year</label>
-            <input v-model="form.academic_year" class="input" placeholder="2025/2026"/>
           </div>
         </div>
       </div>

@@ -56,6 +56,24 @@ services:
           minute: 60
           policy: local
 
+  # Public timetable routes (no JWT) — used during registration before user has a token
+  - name: timetable-public
+    protocol: http
+    host: timetable-upstream
+    port: 80
+    routes:
+      - name: public-universities-read
+        paths:
+          - /api/v1/universities
+        methods:
+          - GET
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 30
+          policy: local
+
   - name: timetable-service
     protocol: http
     host: timetable-upstream
@@ -64,7 +82,6 @@ services:
       - name: timetable-routes
         paths:
           - /api/v1/timetable
-          - /api/v1/universities
           - /api/v1/programs
           - /api/v1/student-groups
           - /api/v1/departments
@@ -74,6 +91,16 @@ services:
           - /api/v1/constraints
           - /api/v1/time-slots
           - /api/v1/templates
+          - /api/v1/academic-years
+        strip_path: false
+      - name: timetable-universities-write
+        paths:
+          - /api/v1/universities
+        methods:
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
         strip_path: false
     plugins:
       - name: jwt

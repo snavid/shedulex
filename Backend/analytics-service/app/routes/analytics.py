@@ -5,16 +5,18 @@ Returns data ready for dashboard charts.
 import os
 import httpx
 from flask import Blueprint, request, jsonify
+from flask import request as _flask_request
 from flask_jwt_extended import jwt_required
 
 analytics_bp = Blueprint("analytics", __name__, url_prefix="/api/v1/analytics")
 
 TIMETABLE_URL = os.environ.get("TIMETABLE_SERVICE_URL", "http://timetable-engine:5002")
-INTERNAL_SERVICE_KEY = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
 
 
 def _headers() -> dict:
-    return {"X-Internal-Service-Key": INTERNAL_SERVICE_KEY}
+    """Forward the caller's JWT so timetable-engine scopes all results to their university."""
+    auth = _flask_request.headers.get("Authorization", "")
+    return {"Authorization": auth}
 
 
 def _get(path: str, client: httpx.Client | None = None) -> dict:

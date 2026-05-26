@@ -32,6 +32,15 @@ def register():
     except ValueError as e:
         return jsonify({"success": False, "message": str(e)}), 409
 
+    if tokens is None:
+        # Non-admin registration: account created but pending approval
+        return jsonify({
+            "success": True,
+            "pending": True,
+            "message": "Registration submitted. Your account is pending approval by a university administrator.",
+            "data": {"user": user.to_dict()},
+        }), 202
+
     return jsonify({
         "success": True,
         "message": "Account created. Please verify your email.",

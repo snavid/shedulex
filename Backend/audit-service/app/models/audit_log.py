@@ -8,6 +8,7 @@ class AuditLog(db.Model):
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(db.String(36), index=True)
+    university_id = db.Column(db.String(36), nullable=True, index=True)
     action = db.Column(db.String(100), nullable=False)
     resource_type = db.Column(db.String(100))
     resource_id = db.Column(db.String(36))
@@ -21,7 +22,9 @@ class AuditLog(db.Model):
 
     def to_dict(self):
         return {
-            "id": self.id, "user_id": self.user_id, "action": self.action,
+            "id": self.id, "user_id": self.user_id,
+            "university_id": self.university_id,
+            "action": self.action,
             "resource_type": self.resource_type, "resource_id": self.resource_id,
             "description": self.description, "ip_address": self.ip_address,
             "service": self.service, "status": self.status,

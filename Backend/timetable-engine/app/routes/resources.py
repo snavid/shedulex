@@ -4,12 +4,13 @@ from flask import Blueprint, request
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.extensions import db
+import datetime as _dt
 from app.models.domain import (
-    Constraint, Course, Department, Lecturer, Program,
+    AcademicYear, Constraint, Course, Department, Lecturer, Program,
     Room, StudentGroup, TimeSlot, TimetableTemplate, TemplateTimeBlock,
     TimetableEntry, University,
 )
-from app.security import service_or_jwt_required
+from app.security import service_or_jwt_required, get_jwt_university_id
 from app.utils.responses import fail, json_body, ok
 
 resources_bp = Blueprint("resources", __name__, url_prefix="/api/v1")
@@ -35,6 +36,10 @@ def _dynamic_update(instance, payload: dict):
     """Keep legacy behavior: apply any attribute present on the model instance."""
     for key, value in payload.items():
         if hasattr(instance, key):
+            # Empty-string FK fields must become NULL, not a zero-length string
+            # that violates the foreign-key constraint.
+            if isinstance(value, str) and value == "" and key.endswith("_id"):
+                value = None
             setattr(instance, key, value)
     db.session.commit()
     return instance
@@ -84,19 +89,100 @@ def delete_university(uni_id):
     return ok(message="University deactivated.")
 
 
+# Academic Years — workspace per study year (e.g. 2025-2026)
+@resources_bp.get("/academic-years")
+@service_or_jwt_required()
+def list_academic_years():
+    uni_id = get_jwt_university_id() or request.args.get("university_id")
+    q = AcademicYear.query.order_by(AcademicYear.name.desc())
+    if uni_id:
+        q = q.filter_by(university_id=uni_id)
+    return ok(data=[y.to_dict() for y in q.all()])
+
+
+@resources_bp.post("/academic-years")
+@service_or_jwt_required(*WRITE_ROLES)
+def create_academic_year():
+    body = json_body()
+    if not body.get("name") or not body.get("university_id"):
+        return fail("name and university_id are required.", status=422)
+
+    def _parse(v):
+        return _dt.date.fromisoformat(v) if v else None
+
+    year = AcademicYear(
+        name=body["name"],
+        university_id=body["university_id"],
+        sem1_start=_parse(body.get("sem1_start")),
+        sem1_end=_parse(body.get("sem1_end")),
+        sem2_start=_parse(body.get("sem2_start")),
+        sem2_end=_parse(body.get("sem2_end")),
+        is_current=body.get("is_current", False),
+        status=body.get("status", "active"),
+    )
+    # If flagged as current, clear other years for same university first
+    if year.is_current:
+        AcademicYear.query.filter_by(
+            university_id=year.university_id, is_current=True
+        ).update({"is_current": False})
+    _create(year)
+    return ok(data=year.to_dict(), status=201)
+
+
+@resources_bp.put("/academic-years/<year_id>")
+@service_or_jwt_required(*WRITE_ROLES)
+def update_academic_year(year_id):
+    year = AcademicYear.query.get_or_404(year_id)
+    body = json_body()
+
+    def _parse(v):
+        return _dt.date.fromisoformat(v) if v else None
+
+    for field in ("name", "status"):
+        if field in body:
+            setattr(year, field, body[field])
+    for field in ("sem1_start", "sem1_end", "sem2_start", "sem2_end"):
+        if field in body:
+            setattr(year, field, _parse(body[field]))
+    db.session.commit()
+    return ok(data=year.to_dict())
+
+
+@resources_bp.post("/academic-years/<year_id>/activate")
+@service_or_jwt_required(*WRITE_ROLES)
+def activate_academic_year(year_id):
+    """Set this year as the current workspace; clears is_current on all others."""
+    year = AcademicYear.query.get_or_404(year_id)
+    AcademicYear.query.filter_by(
+        university_id=year.university_id, is_current=True
+    ).update({"is_current": False})
+    year.is_current = True
+    db.session.commit()
+    return ok(data=year.to_dict())
+
+
+@resources_bp.delete("/academic-years/<year_id>")
+@service_or_jwt_required(*WRITE_ROLES)
+def delete_academic_year(year_id):
+    year = AcademicYear.query.get_or_404(year_id)
+    year.status = "archived"
+    db.session.commit()
+    return ok(message="Academic year archived.")
+
+
 # Programs
 @resources_bp.get("/programs")
 @service_or_jwt_required()
 def list_programs():
     department_id = request.args.get("department_id")
-    university_id = request.args.get("university_id")
+    uni_id = get_jwt_university_id() or request.args.get("university_id")
     query = Program.query.options(
         joinedload(Program.department).joinedload(Department.university)
     ).filter_by(is_active=True)
+    if uni_id:
+        query = query.join(Program.department).filter(Department.university_id == uni_id)
     if department_id:
-        query = query.filter_by(department_id=department_id)
-    if university_id:
-        query = query.join(Department).filter(Department.university_id == university_id)
+        query = query.filter(Program.department_id == department_id)
     return ok(data=[p.to_dict() for p in query.all()])
 
 
@@ -164,15 +250,18 @@ def list_student_groups():
     program_id = request.args.get("program_id")
     year = request.args.get("year_of_study", type=int)
     semester = request.args.get("semester", type=int)
+    uni_id = get_jwt_university_id()
     query = StudentGroup.query.options(
         joinedload(StudentGroup.program)
     ).filter_by(is_active=True)
+    if uni_id:
+        query = query.join(StudentGroup.program).join(Program.department).filter(Department.university_id == uni_id)
     if program_id:
-        query = query.filter_by(program_id=program_id)
+        query = query.filter(StudentGroup.program_id == program_id)
     if year:
-        query = query.filter_by(year_of_study=year)
+        query = query.filter(StudentGroup.year_of_study == year)
     if semester:
-        query = query.filter_by(semester=semester)
+        query = query.filter(StudentGroup.semester == semester)
     return ok(data=[g.to_dict() for g in query.all()])
 
 
@@ -213,10 +302,10 @@ def delete_student_group(group_id):
 @resources_bp.get("/departments")
 @service_or_jwt_required()
 def list_departments():
-    university_id = request.args.get("university_id")
+    uni_id = get_jwt_university_id() or request.args.get("university_id")
     query = Department.query.options(joinedload(Department.university))
-    if university_id:
-        query = query.filter_by(university_id=university_id)
+    if uni_id:
+        query = query.filter_by(university_id=uni_id)
     depts = query.all()
     return ok(data=[d.to_dict() for d in depts])
 
@@ -256,8 +345,11 @@ def delete_department(dept_id):
 @resources_bp.get("/rooms")
 @service_or_jwt_required()
 def list_rooms():
-    rooms = Room.query.all()
-    return ok(data=[r.to_dict() for r in rooms])
+    uni_id = get_jwt_university_id()
+    query = Room.query
+    if uni_id:
+        query = query.filter_by(university_id=uni_id)
+    return ok(data=[r.to_dict() for r in query.all()])
 
 
 @resources_bp.post("/rooms")
@@ -289,8 +381,11 @@ def delete_room(room_id):
 @resources_bp.get("/lecturers")
 @service_or_jwt_required()
 def list_lecturers():
-    lecturers = Lecturer.query.options(joinedload(Lecturer.department)).filter_by(is_active=True).all()
-    return ok(data=[l.to_dict() for l in lecturers])
+    uni_id = get_jwt_university_id()
+    query = Lecturer.query.options(joinedload(Lecturer.department)).filter_by(is_active=True)
+    if uni_id:
+        query = query.join(Lecturer.department).filter(Department.university_id == uni_id)
+    return ok(data=[l.to_dict() for l in query.all()])
 
 
 @resources_bp.post("/lecturers")
@@ -339,20 +434,23 @@ def list_courses():
     program_id = request.args.get("program_id")
     semester = request.args.get("semester", type=int)
     year_of_study = request.args.get("year_of_study", type=int)
+    uni_id = get_jwt_university_id()
     query = Course.query.options(
         joinedload(Course.department),
         joinedload(Course.program),
         joinedload(Course.lecturer).joinedload(Lecturer.department),
         selectinload(Course.student_groups),
     ).filter_by(is_active=True)
+    if uni_id:
+        query = query.join(Course.department).filter(Department.university_id == uni_id)
     if department_id:
-        query = query.filter_by(department_id=department_id)
+        query = query.filter(Course.department_id == department_id)
     if program_id:
-        query = query.filter_by(program_id=program_id)
+        query = query.filter(Course.program_id == program_id)
     if semester:
-        query = query.filter_by(semester=semester)
+        query = query.filter(Course.semester == semester)
     if year_of_study:
-        query = query.filter_by(year_of_study=year_of_study)
+        query = query.filter(Course.year_of_study == year_of_study)
     courses = query.all()
     return ok(data=[c.to_dict() for c in courses])
 
@@ -366,7 +464,13 @@ def create_course():
         "semester", "year_of_study", "credit_hours", "weekly_hours",
         "student_count", "requires_lab", "course_type", "priority",
     }
-    course = Course(**{k: body[k] for k in body if k in allowed})
+    data = {k: body[k] for k in body if k in allowed}
+    # Empty-string FK values (e.g. from a <select> with default "") must be
+    # stored as NULL rather than an empty string that violates the FK constraint.
+    for fk in ("department_id", "program_id", "lecturer_id"):
+        if data.get(fk) == "":
+            data[fk] = None
+    course = Course(**data)
     _create(course)
     return ok(data=course.to_dict(), status=201)
 
@@ -455,7 +559,10 @@ def list_constraints():
     category = request.args.get("category")
     rule_type = request.args.get("rule_type")
     constraint_type = request.args.get("constraint_type")
+    uni_id = get_jwt_university_id()
     q = Constraint.query.filter_by(is_active=True)
+    if uni_id:
+        q = q.filter_by(university_id=uni_id)
     if category:
         q = q.filter_by(category=category)
     if rule_type:
@@ -550,10 +657,10 @@ def delete_time_slot(slot_id):
 @resources_bp.get("/templates")
 @service_or_jwt_required()
 def list_templates():
-    university_id = request.args.get("university_id")
+    uni_id = get_jwt_university_id() or request.args.get("university_id")
     q = TimetableTemplate.query
-    if university_id:
-        q = q.filter_by(university_id=university_id)
+    if uni_id:
+        q = q.filter_by(university_id=uni_id)
     templates = q.all()
     return ok(data=[t.to_dict(include_blocks=True) for t in templates])
 

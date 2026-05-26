@@ -17,6 +17,7 @@ def create_log():
     body = request.get_json() or {}
     log = AuditLog(
         user_id=body.get("user_id"),
+        university_id=body.get("university_id"),
         action=body.get("action", "unknown"),
         resource_type=body.get("resource_type"),
         resource_id=body.get("resource_id"),
@@ -46,6 +47,10 @@ def list_logs():
     service = request.args.get("service")
 
     q = AuditLog.query
+    # Scope to requester's university — admins only see their own university's logs
+    uni_id = claims.get("university_id")
+    if uni_id:
+        q = q.filter_by(university_id=uni_id)
     if user_id:
         q = q.filter_by(user_id=user_id)
     if action:
@@ -70,7 +75,11 @@ def user_activity(user_id):
     if requester.get("role") not in ("admin",) and requester.get("sub") != user_id:
         return jsonify({"success": False, "message": "Forbidden."}), 403
 
-    logs = AuditLog.query.filter_by(user_id=user_id).order_by(AuditLog.created_at.desc()).limit(100).all()
+    q = AuditLog.query.filter_by(user_id=user_id)
+    uni_id = requester.get("university_id")
+    if uni_id:
+        q = q.filter_by(university_id=uni_id)
+    logs = q.order_by(AuditLog.created_at.desc()).limit(100).all()
     return jsonify({"success": True, "data": [l.to_dict() for l in logs]}), 200
 
 
@@ -82,13 +91,24 @@ def log_stats():
         return jsonify({"success": False, "message": "Forbidden."}), 403
 
     from sqlalchemy import func
-    action_counts = db.session.query(AuditLog.action, func.count(AuditLog.id)).group_by(AuditLog.action).all()
-    service_counts = db.session.query(AuditLog.service, func.count(AuditLog.id)).group_by(AuditLog.service).all()
+    uni_id = claims.get("university_id")
+    base = AuditLog.query
+    if uni_id:
+        base = base.filter_by(university_id=uni_id)
+
+    action_counts = (
+        base.with_entities(AuditLog.action, func.count(AuditLog.id))
+        .group_by(AuditLog.action).all()
+    )
+    service_counts = (
+        base.with_entities(AuditLog.service, func.count(AuditLog.id))
+        .group_by(AuditLog.service).all()
+    )
     return jsonify({
         "success": True,
         "data": {
             "by_action": {a: c for a, c in action_counts},
             "by_service": {s: c for s, c in service_counts},
-            "total": AuditLog.query.count(),
+            "total": base.count(),
         },
     }), 200

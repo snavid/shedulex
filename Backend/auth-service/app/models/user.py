@@ -34,6 +34,7 @@ class User(db.Model):
     university_id = db.Column(db.String(36))  # soft-ref to timetable-service university
     role_id = db.Column(db.String(36), db.ForeignKey("roles.id"), nullable=False)
     is_active = db.Column(db.Boolean, default=True)
+    is_approved = db.Column(db.Boolean, default=True, server_default="1")
     is_verified = db.Column(db.Boolean, default=False)
     must_change_password = db.Column(db.Boolean, default=False)  # force change on first login
     verification_token = db.Column(db.String(255))
@@ -69,6 +70,7 @@ class User(db.Model):
             "university_id": self.university_id,
             "role": self.role.to_dict() if self.role else None,
             "is_active": self.is_active,
+            "is_approved": self.is_approved,
             "is_verified": self.is_verified,
             "must_change_password": self.must_change_password,
             "last_login": self.last_login.isoformat() if self.last_login else None,

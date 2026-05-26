@@ -11,6 +11,17 @@ def is_internal_request() -> bool:
     return bool(expected) and bool(provided) and secrets.compare_digest(provided, expected)
 
 
+def get_jwt_university_id() -> str | None:
+    """Return the university_id from the current JWT claims.
+    Returns None for internal service requests (no tenant scope) or missing claims."""
+    if is_internal_request():
+        return None
+    try:
+        return get_jwt().get("university_id") or None
+    except Exception:
+        return None
+
+
 def service_or_jwt_required(*roles):
     """Allow either trusted internal service key or a valid JWT."""
 

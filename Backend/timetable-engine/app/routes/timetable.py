@@ -1,10 +1,22 @@
 from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity
 from app.services import timetable_service
-from app.security import service_or_jwt_required, is_internal_request
+from app.security import service_or_jwt_required, is_internal_request, get_jwt_university_id
 from app.utils.responses import fail, json_body, ok, require_fields
 
 timetable_bp = Blueprint("timetable", __name__, url_prefix="/api/v1/timetable")
+
+
+def _check_timetable_access(tt):
+    """Return a 404 fail response if the caller's university doesn't own the timetable, else None."""
+    if is_internal_request():
+        return None
+    uni_id = get_jwt_university_id()
+    if uni_id:
+        dept = getattr(tt, "department", None)
+        if not dept or dept.university_id != uni_id:
+            return fail("Timetable not found.", status=404)
+    return None
 
 
 @timetable_bp.post("/generate")
@@ -26,6 +38,7 @@ def generate():
             program_id=body.get("program_id"),
             template_id=body.get("template_id"),
             calendar_semester_id=body.get("calendar_semester_id"),
+            academic_year_id=body.get("academic_year_id"),
             config_overrides=body.get("ga_config"),
         )
     except (ValueError, RuntimeError) as e:
@@ -45,7 +58,10 @@ def list_timetables():
     prog = request.args.get("program_id")
     sem = request.args.get("semester", type=int)
     status = request.args.get("status")
-    timetables = timetable_service.list_timetables(dept, sem, status, prog)
+    academic_year_id = request.args.get("academic_year_id")
+    # Internal services may pass ?university_id= to scope results; JWT requests are always scoped by claims.
+    university_id = request.args.get("university_id") if is_internal_request() else get_jwt_university_id()
+    timetables = timetable_service.list_timetables(dept, sem, status, prog, academic_year_id, university_id)
     return ok(data=[t.to_dict() for t in timetables])
 
 
@@ -55,12 +71,21 @@ def get_timetable(timetable_id):
     tt = timetable_service.get_timetable_by_id(timetable_id)
     if not tt:
         return fail("Timetable not found.", status=404)
+    err = _check_timetable_access(tt)
+    if err:
+        return err
     return ok(data=tt.to_dict(include_entries=True))
 
 
 @timetable_bp.get("/<timetable_id>/conflicts")
 @service_or_jwt_required()
 def get_conflicts(timetable_id):
+    tt = timetable_service.get_timetable_by_id(timetable_id)
+    if not tt:
+        return fail("Timetable not found.", status=404)
+    err = _check_timetable_access(tt)
+    if err:
+        return err
     conflicts = timetable_service.detect_conflicts(timetable_id)
     return ok(data=conflicts, extra={"total": len(conflicts)})
 
@@ -132,6 +157,12 @@ def create_version_snapshot(timetable_id):
 @timetable_bp.get("/<timetable_id>/versions")
 @service_or_jwt_required()
 def list_versions(timetable_id):
+    tt = timetable_service.get_timetable_by_id(timetable_id)
+    if not tt:
+        return fail("Timetable not found.", status=404)
+    err = _check_timetable_access(tt)
+    if err:
+        return err
     versions = timetable_service.list_snapshots(timetable_id)
     return ok(data=[v.to_dict() for v in versions])
 
@@ -150,6 +181,12 @@ def restore_version(snapshot_id):
 @service_or_jwt_required()
 def get_violations(timetable_id):
     """Return the GA violation report stored on the timetable after generation."""
+    tt = timetable_service.get_timetable_by_id(timetable_id)
+    if not tt:
+        return fail("Timetable not found.", status=404)
+    err = _check_timetable_access(tt)
+    if err:
+        return err
     report = timetable_service.get_violation_report(timetable_id)
     return ok(data=report, extra={"total": len(report)})
 

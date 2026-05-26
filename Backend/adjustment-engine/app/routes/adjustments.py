@@ -486,7 +486,7 @@ def get_request_status(request_id):
 @jwt_required()
 def get_history():
     timetable_id = request.args.get("timetable_id")
-    q = AdjustmentRequest.query
+    q = AdjustmentRequest.query.filter_by(requested_by=get_jwt_identity())
     if timetable_id:
         q = q.filter_by(timetable_id=timetable_id)
     reqs = q.order_by(AdjustmentRequest.created_at.desc()).limit(50).all()
@@ -497,9 +497,9 @@ def get_history():
 @jwt_required()
 def get_conflicts():
     timetable_id = request.args.get("timetable_id")
-    q = ConflictLog.query
-    if timetable_id:
-        q = q.filter_by(timetable_id=timetable_id)
+    if not timetable_id:
+        return jsonify({"success": True, "data": []}), 200
+    q = ConflictLog.query.filter_by(timetable_id=timetable_id)
     resolved = request.args.get("resolved")
     if resolved is not None:
         q = q.filter_by(resolved=(resolved.lower() == "true"))

@@ -1,5 +1,7 @@
+import os
 import re
 
+import httpx
 from flask import Blueprint, Response, current_app, jsonify, request
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 
@@ -18,6 +20,28 @@ from app.services.export_service import (
 documents_bp = Blueprint("documents", __name__, url_prefix="/api/v1/documents")
 
 MANAGER_ROLES = {"admin", "timetable_officer", "hod"}
+
+_TIMETABLE_URL = os.environ.get("TIMETABLE_SERVICE_URL", "http://timetable-engine:5002")
+_INTERNAL_KEY = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
+
+
+def _owns_timetable(timetable_id: str) -> bool:
+    """Return True if the JWT's university owns this timetable (or no university scope set)."""
+    university_id = get_jwt().get("university_id")
+    if not university_id:
+        return True
+    try:
+        resp = httpx.get(
+            f"{_TIMETABLE_URL}/api/v1/timetable/{timetable_id}",
+            headers={"X-Internal-Service-Key": _INTERNAL_KEY},
+            timeout=5.0,
+        )
+        if resp.status_code != 200:
+            return False
+        dept = resp.json().get("data", {}).get("department") or {}
+        return dept.get("university_id") == university_id
+    except Exception:
+        return False
 
 
 def _json_ok(data=None, message=None, status=200):
@@ -108,6 +132,8 @@ def _share_url(token: str) -> str:
 @documents_bp.get("/timetable/<timetable_id>/preview")
 @jwt_required()
 def export_preview(timetable_id):
+    if not _owns_timetable(timetable_id):
+        return _json_error("Not found.", status=404)
     try:
         preview = preview_exports(timetable_id)
         return _json_ok(preview)
@@ -119,6 +145,8 @@ def export_preview(timetable_id):
 @documents_bp.get("/timetable/<timetable_id>/pdf")
 @jwt_required()
 def download_pdf(timetable_id):
+    if not _owns_timetable(timetable_id):
+        return _json_error("Not found.", status=404)
     try:
         result = export_document(
             timetable_id=timetable_id,
@@ -135,6 +163,8 @@ def download_pdf(timetable_id):
 @documents_bp.get("/timetable/<timetable_id>/excel")
 @jwt_required()
 def download_excel(timetable_id):
+    if not _owns_timetable(timetable_id):
+        return _json_error("Not found.", status=404)
     try:
         result = export_document(
             timetable_id=timetable_id,
@@ -151,6 +181,8 @@ def download_excel(timetable_id):
 @documents_bp.get("/timetable/<timetable_id>/csv")
 @jwt_required()
 def download_csv(timetable_id):
+    if not _owns_timetable(timetable_id):
+        return _json_error("Not found.", status=404)
     try:
         result = export_document(
             timetable_id=timetable_id,
@@ -167,6 +199,8 @@ def download_csv(timetable_id):
 @documents_bp.get("/timetable/<timetable_id>/bundle")
 @jwt_required()
 def download_bundle(timetable_id):
+    if not _owns_timetable(timetable_id):
+        return _json_error("Not found.", status=404)
     try:
         result = export_bundle(
             timetable_id=timetable_id,
@@ -197,6 +231,8 @@ def create_share_link():
 
     if not timetable_id:
         return _json_error("timetable_id is required.", status=422)
+    if not _owns_timetable(timetable_id):
+        return _json_error("Not found.", status=404)
     if export_format not in {PDF_FORMAT, EXCEL_FORMAT, CSV_FORMAT, BUNDLE_FORMAT}:
         return _json_error("Invalid export format.", status=422)
     if expires_hours > expires_cap:

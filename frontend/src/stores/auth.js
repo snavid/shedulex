@@ -26,13 +26,17 @@ export const useAuthStore = defineStore("auth", () => {
 
   async function register(payload) {
     const { data } = await authApi.register(payload)
+    // HTTP 202: account created but pending admin approval — no tokens issued
+    if (data.pending) {
+      return { pending: true, user: data.data?.user }
+    }
     const d = data.data
     accessToken.value = d.access_token
     refreshToken.value = d.refresh_token
     user.value = d.user
     localStorage.setItem("access_token", d.access_token)
     localStorage.setItem("refresh_token", d.refresh_token)
-    return d
+    return { pending: false, ...d }
   }
 
   async function logout() {

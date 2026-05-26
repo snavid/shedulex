@@ -16,8 +16,10 @@ const form = ref({
 })
 const loading = ref(false)
 const error = ref("")
+const pendingApproval = ref(false)
+const registeredName = ref("")
 
-// University mode: "select" (join existing) or "create" (new)
+// "select" = join existing; "create" = new university (admin only)
 const uniMode = ref("select")
 const universities = ref([])
 
@@ -31,7 +33,8 @@ onMounted(async () => {
   }
 })
 
-const isAdmin = computed(() => ["admin", "timetable_officer", "hod"].includes(form.value.role_name))
+// Only admins can create a new university
+const isAdmin = computed(() => form.value.role_name === "admin")
 
 async function submit() {
   error.value = ""
@@ -52,14 +55,18 @@ async function submit() {
   } else {
     delete payload.university_id
   }
-  // remove empty strings
   Object.keys(payload).forEach(k => { if (payload[k] === "") delete payload[k] })
 
   loading.value = true
   try {
-    await auth.register(payload)
-    toast.success("Account created! Please verify your email.")
-    router.push("/dashboard")
+    const result = await auth.register(payload)
+    if (result.pending) {
+      registeredName.value = form.value.first_name
+      pendingApproval.value = true
+    } else {
+      toast.success("Account created! Welcome to Shedulex.")
+      router.push("/dashboard")
+    }
   } catch (e) {
     error.value = e.response?.data?.message || "Registration failed."
   } finally {
@@ -71,7 +78,23 @@ async function submit() {
 <template>
   <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4 py-8">
     <div class="w-full max-w-lg">
-      <div class="bg-white rounded-2xl shadow-xl p-8">
+
+      <!-- Pending approval screen -->
+      <div v-if="pendingApproval" class="bg-white rounded-2xl shadow-xl p-10 text-center">
+        <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-amber-100 text-amber-600 text-4xl mb-6">⏳</div>
+        <h2 class="text-2xl font-bold text-gray-900 mb-2">Registration Submitted!</h2>
+        <p class="text-gray-600 mb-4">
+          Thanks{{ registeredName ? `, ${registeredName}` : "" }}. Your account is
+          <span class="font-semibold text-amber-600">pending approval</span> by a university administrator.
+        </p>
+        <p class="text-sm text-gray-500 mb-8">
+          You'll be able to log in once your account has been reviewed and activated. This usually takes less than 24 hours.
+        </p>
+        <RouterLink to="/login" class="btn-primary inline-block px-8">Back to Login</RouterLink>
+      </div>
+
+      <!-- Registration form -->
+      <div v-else class="bg-white rounded-2xl shadow-xl p-8">
         <div class="text-center mb-8">
           <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600 text-white text-3xl mb-4">📅</div>
           <h1 class="text-2xl font-bold text-gray-900">Create Account</h1>
@@ -93,7 +116,6 @@ async function submit() {
             </div>
           </div>
 
-          <!-- Account details -->
           <div>
             <label class="label">Email Address</label>
             <input v-model="form.email" type="email" required class="input" placeholder="you@university.ac" />
@@ -107,7 +129,6 @@ async function submit() {
             <input v-model="form.password" type="password" required class="input" placeholder="Min 8 chars, 1 uppercase, 1 digit" />
           </div>
 
-          <!-- Optional personal info -->
           <div class="grid grid-cols-2 gap-4">
             <div>
               <label class="label">Phone (optional)</label>
@@ -129,13 +150,20 @@ async function submit() {
               <option value="lecturer">Lecturer</option>
               <option value="student">Student</option>
             </select>
+            <p v-if="!isAdmin" class="text-xs text-amber-600 mt-1">
+              Non-admin accounts require approval from a university administrator before you can log in.
+            </p>
+            <p v-else class="text-xs text-green-600 mt-1">
+              Admin accounts are activated immediately and can set up their university.
+            </p>
           </div>
 
-          <!-- University section -->
+          <!-- University -->
           <div class="border border-blue-100 rounded-xl p-4 space-y-3 bg-blue-50/40">
             <div class="flex items-center justify-between">
               <label class="label !mb-0 font-semibold">University</label>
-              <div class="flex gap-1 rounded-lg border border-blue-200 overflow-hidden text-xs">
+              <!-- Only admins can create a new university -->
+              <div v-if="isAdmin" class="flex gap-1 rounded-lg border border-blue-200 overflow-hidden text-xs">
                 <button
                   type="button"
                   @click="uniMode = 'select'"
@@ -152,19 +180,23 @@ async function submit() {
             </div>
 
             <!-- Join existing university -->
-            <div v-if="uniMode === 'select'">
+            <div v-if="!isAdmin || uniMode === 'select'">
               <template v-if="universities.length">
                 <select v-model="form.university_id" class="input">
                   <option value="">— Select your university —</option>
                   <option v-for="u in universities" :key="u.id" :value="u.id">{{ u.name }} ({{ u.code }})</option>
                 </select>
               </template>
-              <p v-else class="text-sm text-gray-500 italic">No universities registered yet. Switch to "Create New" to set one up.</p>
+              <p v-else class="text-sm text-gray-500 italic">
+                No universities registered yet.
+                <template v-if="isAdmin"> Switch to "Create New" to set one up.</template>
+                <template v-else> Please contact your university administrator.</template>
+              </p>
             </div>
 
-            <!-- Create new university -->
+            <!-- Create new university (admin only) -->
             <div v-else class="space-y-2">
-              <p class="text-xs text-blue-700">You're creating a new university. Use this if you're setting up Shedulex for your institution.</p>
+              <p class="text-xs text-blue-700">You're setting up Shedulex for a new university.</p>
               <div class="grid grid-cols-2 gap-3">
                 <div>
                   <label class="label">University Name *</label>
@@ -192,6 +224,7 @@ async function submit() {
           <RouterLink to="/login" class="text-blue-600 hover:text-blue-700 font-medium">Sign in</RouterLink>
         </p>
       </div>
+
     </div>
   </div>
 </template>

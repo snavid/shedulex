@@ -27,7 +27,7 @@ const router = createRouter({
           component: () => import("@/views/timetable/GenerateView.vue"),
           meta: { roles: ["admin", "timetable_officer"] },
         },
-        { path: "resources/universities", name: "universities", component: () => import("@/views/resources/UniversityView.vue"), meta: { roles: ["admin", "timetable_officer"] } },
+        { path: "resources/universities", name: "universities", component: () => import("@/views/resources/UniversityView.vue") },
         { path: "resources/programs", name: "programs", component: () => import("@/views/resources/ProgramsView.vue") },
         { path: "resources/student-groups", name: "student-groups", component: () => import("@/views/resources/StudentGroupsView.vue") },
         { path: "resources/departments", name: "departments", component: () => import("@/views/resources/DepartmentsView.vue") },
