@@ -166,6 +166,8 @@ def generate_timetable(
             "capacity": r.capacity,
             "room_type": r.room_type,
             "name": r.name,
+            "building": r.building,
+            "has_projector": r.has_projector,
             "has_lab_equipment": r.has_lab_equipment,
         }
         for r in rooms
