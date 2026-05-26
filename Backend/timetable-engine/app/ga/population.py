@@ -10,6 +10,7 @@ Improvements over the naive random version:
 """
 from __future__ import annotations
 import random
+from collections import defaultdict
 from app.ga.chromosome import Chromosome, Gene
 
 
@@ -27,14 +28,35 @@ def initialize_population(
     rooms: list[dict],
     slots: list[dict],
     lecturers: dict | None = None,
+    external_bookings: dict | None = None,
 ) -> list[Chromosome]:
     """
     courses:  list of dicts with keys id, weekly_hours, requires_lab, lecturer_id, priority
     rooms:    list of room dicts (id, room_type, capacity)
     slots:    list of slot dicts (id, day, slot_index, is_break, slot_type)
     lecturers: optional dict[lec_id → {availability, preferred_days, unavailable_slots}]
+    external_bookings: optional {room: {(room_id, day, start, end): [meta]},
+                                  lecturer: {(lec_id, day, start, end): [meta]}}
     """
     lecturers = lecturers or {}
+    external_bookings = external_bookings or {"room": {}, "lecturer": {}}
+
+    # Build wall-clock → slot_id index for resolving external booking keys
+    wallclock_to_slot: dict[tuple, str] = {
+        (s["day"], s["start_time"], s["end_time"]): s["id"] for s in slots
+    }
+    # room_id → set of slot_ids already taken by other departments
+    room_busy_slots: dict[str, set] = defaultdict(set)
+    for (room_id, d, st, en) in external_bookings.get("room", {}):
+        sid = wallclock_to_slot.get((d, st, en))
+        if sid:
+            room_busy_slots[room_id].add(sid)
+    # lec_id → set of slot_ids already taken by other departments
+    lec_busy_slots: dict[str, set] = defaultdict(set)
+    for (lec_id, d, st, en) in external_bookings.get("lecturer", {}):
+        sid = wallclock_to_slot.get((d, st, en))
+        if sid:
+            lec_busy_slots[lec_id].add(sid)
 
     lab_rooms = [r for r in rooms if r.get("room_type") == "lab"]
     non_lab_rooms = [r for r in rooms if r.get("room_type") != "lab"]
@@ -127,17 +149,26 @@ def initialize_population(
                 group_used[group_id] = []
 
             for session_idx in range(sessions):
-                # Avoid slots already used by this lecturer or this group
+                # Avoid slots already used by this lecturer, this group, or by another dept
                 busy = set(lec_used[lec_id])
                 if group_id:
                     busy |= set(group_used[group_id])
+                # Also exclude slots blocked by other departments for this lecturer
+                busy |= lec_busy_slots.get(lec_id, set())
                 unused = [s for s in slot_pool if s["id"] not in busy]
                 chosen_slot = (
                     random.choice(unused)
                     if unused
                     else random.choice(slot_pool)
                 )
-                chosen_room = random.choice(room_pool)
+
+                # Prefer a room not already booked externally for this slot
+                slot_id_chosen = chosen_slot["id"]
+                free_rooms = [
+                    r for r in room_pool
+                    if slot_id_chosen not in room_busy_slots.get(r["id"], set())
+                ]
+                chosen_room = random.choice(free_rooms) if free_rooms else random.choice(room_pool)
 
                 lec_used[lec_id].append(chosen_slot["id"])
                 if group_id:

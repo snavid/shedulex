@@ -14,6 +14,60 @@ from app.models.domain import (
 from app.ga import run_ga, GAConfig
 
 
+def _load_external_bookings(current_timetable: "Timetable") -> dict:
+    """Return room+lecturer bookings from OTHER active timetables in the same
+    university / semester / academic-year, keyed by (id, day, start_time, end_time).
+
+    Uses wall-clock times (not time_slot_id) so two departments using different
+    TimetableTemplate rows whose blocks share the same physical hours still collide.
+    """
+    dept = current_timetable.department
+    if not dept:
+        return {"room": {}, "lecturer": {}}
+
+    q = (
+        TimetableEntry.query
+        .join(Timetable, TimetableEntry.timetable_id == Timetable.id)
+        .join(Department, Timetable.department_id == Department.id)
+        .join(TimeSlot, TimetableEntry.time_slot_id == TimeSlot.id)
+        .options(
+            joinedload(TimetableEntry.time_slot),
+            joinedload(TimetableEntry.room),
+            joinedload(TimetableEntry.lecturer),
+            joinedload(TimetableEntry.course).joinedload(Course.department),
+        )
+        .filter(
+            Department.university_id == dept.university_id,
+            Timetable.semester == current_timetable.semester,
+            Timetable.status == "active",
+            Timetable.id != current_timetable.id,
+        )
+    )
+    if current_timetable.academic_year_id:
+        q = q.filter(Timetable.academic_year_id == current_timetable.academic_year_id)
+    else:
+        q = q.filter(Timetable.academic_year == current_timetable.academic_year)
+
+    room_idx: dict = {}
+    lec_idx: dict = {}
+    for e in q.all():
+        s = e.time_slot
+        if not s:
+            continue
+        meta = {
+            "course_name": e.course.name if e.course else "?",
+            "department_name": e.course.department.name if e.course and e.course.department else "?",
+            "timetable_id": e.timetable_id,
+            "room_name": e.room.name if e.room else None,
+            "lecturer_name": e.lecturer.name if e.lecturer else None,
+        }
+        if e.room_id:
+            room_idx.setdefault((e.room_id, s.day, s.start_time, s.end_time), []).append(meta)
+        if e.lecturer_id:
+            lec_idx.setdefault((e.lecturer_id, s.day, s.start_time, s.end_time), []).append(meta)
+    return {"room": room_idx, "lecturer": lec_idx}
+
+
 def generate_timetable(
     department_id: str,
     semester: int,
@@ -171,6 +225,10 @@ def generate_timetable(
     db.session.add(timetable)
     db.session.flush()  # assign primary key without committing
 
+    # Load existing bookings from sibling active timetables so the GA avoids conflicts
+    # with rooms/lecturers already scheduled by another department.
+    external_bookings = _load_external_bookings(timetable)
+
     try:
         result = run_ga(
             courses=courses_data,
@@ -179,6 +237,7 @@ def generate_timetable(
             lecturers=lecturers_dict,
             config=ga_cfg,
             db_constraints=db_constraints_data,
+            external_bookings=external_bookings,
         )
     except Exception as exc:
         db.session.rollback()

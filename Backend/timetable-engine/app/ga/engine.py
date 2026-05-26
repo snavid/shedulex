@@ -74,6 +74,7 @@ def run_ga(
     lecturers: dict,
     config: GAConfig | None = None,
     db_constraints: list[dict] | None = None,
+    external_bookings: dict | None = None,
     progress_callback=None,
 ) -> GAResult:
     """
@@ -108,6 +109,7 @@ def run_ga(
         "slots": {s["id"]: s for s in slots},
         "lecturers": lecturers,
         "db_constraints": db_constraints or [],
+        "external_bookings": external_bookings or {"room": {}, "lecturer": {}},
     }
 
     room_ids = [r["id"] for r in rooms]
@@ -117,7 +119,8 @@ def run_ga(
     start = time.perf_counter()
 
     # Step 1 – Smart population initialisation
-    population = initialize_population(cfg.population_size, courses, rooms, slots, lecturers)
+    population = initialize_population(cfg.population_size, courses, rooms, slots, lecturers,
+                                       external_bookings=ctx["external_bookings"])
 
     # Step 2 – Initial parallel fitness evaluation
     _parallel_evaluate(population, ctx, _EVAL_WORKERS)
@@ -190,7 +193,8 @@ def run_ga(
         if stagnation_count >= cfg.stagnation_limit:
             logger.debug("Stagnation at gen %d, injecting diversity", generation)
             inject_count = cfg.population_size // 5
-            fresh = initialize_population(inject_count, courses, rooms, slots, lecturers)
+            fresh = initialize_population(inject_count, courses, rooms, slots, lecturers,
+                                          external_bookings=ctx["external_bookings"])
             _parallel_evaluate(fresh, ctx, _EVAL_WORKERS)
             population[-inject_count:] = fresh
             stagnation_count = 0

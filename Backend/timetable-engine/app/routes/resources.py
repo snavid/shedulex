@@ -10,7 +10,7 @@ from app.models.domain import (
     Room, StudentGroup, TimeSlot, TimetableTemplate, TemplateTimeBlock,
     TimetableEntry, University,
 )
-from app.security import service_or_jwt_required, get_jwt_university_id
+from app.security import service_or_jwt_required, get_jwt_university_id, is_internal_request
 from app.utils.responses import fail, json_body, ok
 
 resources_bp = Blueprint("resources", __name__, url_prefix="/api/v1")
@@ -93,7 +93,12 @@ def delete_university(uni_id):
 @resources_bp.get("/academic-years")
 @service_or_jwt_required()
 def list_academic_years():
-    uni_id = get_jwt_university_id() or request.args.get("university_id")
+    if is_internal_request():
+        uni_id = request.args.get("university_id")
+    else:
+        uni_id = get_jwt_university_id()
+        if not uni_id:
+            return ok(data=[])
     q = AcademicYear.query.order_by(AcademicYear.name.desc())
     if uni_id:
         q = q.filter_by(university_id=uni_id)
@@ -175,7 +180,12 @@ def delete_academic_year(year_id):
 @service_or_jwt_required()
 def list_programs():
     department_id = request.args.get("department_id")
-    uni_id = get_jwt_university_id() or request.args.get("university_id")
+    if is_internal_request():
+        uni_id = request.args.get("university_id")
+    else:
+        uni_id = get_jwt_university_id()
+        if not uni_id:
+            return ok(data=[])
     query = Program.query.options(
         joinedload(Program.department).joinedload(Department.university)
     ).filter_by(is_active=True)
@@ -250,7 +260,12 @@ def list_student_groups():
     program_id = request.args.get("program_id")
     year = request.args.get("year_of_study", type=int)
     semester = request.args.get("semester", type=int)
-    uni_id = get_jwt_university_id()
+    if is_internal_request():
+        uni_id = request.args.get("university_id")
+    else:
+        uni_id = get_jwt_university_id()
+        if not uni_id:
+            return ok(data=[])
     query = StudentGroup.query.options(
         joinedload(StudentGroup.program)
     ).filter_by(is_active=True)
@@ -302,12 +317,16 @@ def delete_student_group(group_id):
 @resources_bp.get("/departments")
 @service_or_jwt_required()
 def list_departments():
-    uni_id = get_jwt_university_id() or request.args.get("university_id")
+    if is_internal_request():
+        uni_id = request.args.get("university_id")
+    else:
+        uni_id = get_jwt_university_id()
+        if not uni_id:
+            return ok(data=[])
     query = Department.query.options(joinedload(Department.university))
     if uni_id:
         query = query.filter_by(university_id=uni_id)
-    depts = query.all()
-    return ok(data=[d.to_dict() for d in depts])
+    return ok(data=[d.to_dict() for d in query.all()])
 
 
 @resources_bp.post("/departments")
@@ -345,7 +364,12 @@ def delete_department(dept_id):
 @resources_bp.get("/rooms")
 @service_or_jwt_required()
 def list_rooms():
-    uni_id = get_jwt_university_id()
+    if is_internal_request():
+        uni_id = request.args.get("university_id")
+    else:
+        uni_id = get_jwt_university_id()
+        if not uni_id:
+            return ok(data=[])
     query = Room.query
     if uni_id:
         query = query.filter_by(university_id=uni_id)
@@ -381,7 +405,12 @@ def delete_room(room_id):
 @resources_bp.get("/lecturers")
 @service_or_jwt_required()
 def list_lecturers():
-    uni_id = get_jwt_university_id()
+    if is_internal_request():
+        uni_id = request.args.get("university_id")
+    else:
+        uni_id = get_jwt_university_id()
+        if not uni_id:
+            return ok(data=[])
     query = Lecturer.query.options(joinedload(Lecturer.department)).filter_by(is_active=True)
     if uni_id:
         query = query.join(Lecturer.department).filter(Department.university_id == uni_id)
@@ -434,7 +463,12 @@ def list_courses():
     program_id = request.args.get("program_id")
     semester = request.args.get("semester", type=int)
     year_of_study = request.args.get("year_of_study", type=int)
-    uni_id = get_jwt_university_id()
+    if is_internal_request():
+        uni_id = request.args.get("university_id")
+    else:
+        uni_id = get_jwt_university_id()
+        if not uni_id:
+            return ok(data=[])
     query = Course.query.options(
         joinedload(Course.department),
         joinedload(Course.program),
@@ -607,7 +641,12 @@ def list_constraints():
     category = request.args.get("category")
     rule_type = request.args.get("rule_type")
     constraint_type = request.args.get("constraint_type")
-    uni_id = get_jwt_university_id()
+    if is_internal_request():
+        uni_id = request.args.get("university_id")
+    else:
+        uni_id = get_jwt_university_id()
+        if not uni_id:
+            return ok(data=[])
     q = Constraint.query.filter_by(is_active=True)
     if uni_id:
         q = q.filter_by(university_id=uni_id)
@@ -705,7 +744,12 @@ def delete_time_slot(slot_id):
 @resources_bp.get("/templates")
 @service_or_jwt_required()
 def list_templates():
-    uni_id = get_jwt_university_id() or request.args.get("university_id")
+    if is_internal_request():
+        uni_id = request.args.get("university_id")
+    else:
+        uni_id = get_jwt_university_id()
+        if not uni_id:
+            return ok(data=[])
     q = TimetableTemplate.query
     if uni_id:
         q = q.filter_by(university_id=uni_id)

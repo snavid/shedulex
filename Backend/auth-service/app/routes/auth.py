@@ -76,7 +76,12 @@ def refresh():
     if not user or not user.is_active:
         return jsonify({"success": False, "message": "User not found or inactive."}), 404
 
-    tokens = generate_tokens(user_id, {"role": user.role.name, "email": user.email})
+    tokens = generate_tokens(user_id, {
+        "role": user.role.name,
+        "email": user.email,
+        "must_change_password": user.must_change_password,
+        "university_id": str(user.university_id) if user.university_id else None,
+    })
     return jsonify({"success": True, "data": {**tokens, "token_type": "Bearer"}}), 200
 
 

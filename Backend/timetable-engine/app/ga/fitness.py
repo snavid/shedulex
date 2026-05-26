@@ -77,6 +77,9 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
     slots = context["slots"]
     lecturers = context["lecturers"]
     db_constraints: list[dict] = context.get("db_constraints", [])
+    _ext = context.get("external_bookings", {"room": {}, "lecturer": {}})
+    ext_room: dict = _ext.get("room", {})
+    ext_lec: dict = _ext.get("lecturer", {})
 
     # ── Build lookup indices ──────────────────────────────────────────────────
     # slot_key → [course_id]
@@ -99,6 +102,16 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
         slot_day = slot.get("day", "")
         slot_idx = slot.get("slot_index", 0)
         slot_type = slot.get("slot_type", "class")
+        slot_start = slot.get("start_time", "")
+        slot_end = slot.get("end_time", "")
+
+        # H10 – Room booked by another active timetable (cross-department)
+        if gene.room_id and (gene.room_id, slot_day, slot_start, slot_end) in ext_room:
+            penalty += HARD_PENALTY
+
+        # H11 – Lecturer booked by another active timetable (cross-department)
+        if lec_id and (lec_id, slot_day, slot_start, slot_end) in ext_lec:
+            penalty += HARD_PENALTY
 
         # H1 – Lecturer double-booking
         if lec_id:
@@ -276,8 +289,8 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
 
     # ── Normalise ─────────────────────────────────────────────────────────────
     n = max(1, len(chromosome.genes))
-    # Worst-case: every gene triggers every hard constraint
-    worst = n * HARD_PENALTY * 5
+    # Worst-case: every gene triggers every hard constraint (H1-H7, H10, H11 = 9 checks)
+    worst = n * HARD_PENALTY * 9
     fitness = max(0.0, 1.0 - (penalty / worst))
     return round(fitness, 6)
 
@@ -293,6 +306,9 @@ def violation_report(chromosome: Chromosome, context: dict) -> list[dict]:
     rooms = context["rooms"]
     slots = context["slots"]
     lecturers = context["lecturers"]
+    _ext_vr = context.get("external_bookings", {"room": {}, "lecturer": {}})
+    ext_room_vr: dict = _ext_vr.get("room", {})
+    ext_lec_vr: dict = _ext_vr.get("lecturer", {})
 
     lec_slot_map: dict[str, list] = defaultdict(list)
     room_slot_map: dict[str, list] = defaultdict(list)
@@ -306,8 +322,10 @@ def violation_report(chromosome: Chromosome, context: dict) -> list[dict]:
         lec_id = course.get("lecturer_id", "")
         grp_id = gene.student_group_id or course.get("student_group_id", "")
         slot_day = slot.get("day", "")
+        slot_start_vr = slot.get("start_time", "")
+        slot_end_vr = slot.get("end_time", "")
         slot_type = slot.get("slot_type", "class")
-        slot_label = f"{slot_day} {slot.get('start_time', '')}–{slot.get('end_time', '')}"
+        slot_label = f"{slot_day} {slot_start_vr}–{slot_end_vr}"
 
         if lec_id:
             key = f"{lec_id}:{gene.time_slot_id}"
@@ -364,6 +382,34 @@ def violation_report(chromosome: Chromosome, context: dict) -> list[dict]:
                     "rule": "H7 — Student group double-booked",
                     "message": f"Student group has two classes at {slot_label}: "
                                f"{group_slot_map[gkey][0]} and {group_slot_map[gkey][1]}",
+                })
+
+        # H10 – Room booked by another active timetable
+        if gene.room_id:
+            hit = ext_room_vr.get((gene.room_id, slot_day, slot_start_vr, slot_end_vr))
+            if hit:
+                other = hit[0]
+                violations.append({
+                    "severity": "high", "category": "room",
+                    "rule": "H10 — Room booked by another department",
+                    "message": (
+                        f"{room.get('name', gene.room_id)} at {slot_label} is already booked by "
+                        f"{other['department_name']} ({other['course_name']})."
+                    ),
+                })
+
+        # H11 – Lecturer booked by another active timetable
+        if lec_id:
+            hit = ext_lec_vr.get((lec_id, slot_day, slot_start_vr, slot_end_vr))
+            if hit:
+                other = hit[0]
+                violations.append({
+                    "severity": "high", "category": "lecturer",
+                    "rule": "H11 — Lecturer booked by another department",
+                    "message": (
+                        f"{other.get('lecturer_name', lec_id)} at {slot_label} is already assigned by "
+                        f"{other['department_name']} ({other['course_name']})."
+                    ),
                 })
 
         if lec_id and slot_day:
