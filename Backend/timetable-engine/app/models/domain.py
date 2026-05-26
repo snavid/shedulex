@@ -346,6 +346,8 @@ class Course(db.Model):
     program = db.relationship("Program", back_populates="courses")
     lecturer = db.relationship("Lecturer", back_populates="courses")
     student_groups = db.relationship("StudentGroup", secondary="course_student_groups", back_populates="courses")
+    group_lecturers = db.relationship("CourseGroupLecturer", back_populates="course",
+                                      cascade="all, delete-orphan", lazy="selectin")
 
     def to_dict(self):
         return {
@@ -360,6 +362,40 @@ class Course(db.Model):
             "department": self.department.to_dict() if self.department else None,
             "student_group_ids": [g.id for g in self.student_groups] if self.student_groups else [],
             "student_groups": [{"id": g.id, "code": g.code, "name": g.name} for g in self.student_groups] if self.student_groups else [],
+            # Per-group lecturer overrides: { student_group_id: { lecturer_id, lecturer } }
+            "group_lecturers": {
+                gl.student_group_id: {
+                    "lecturer_id": gl.lecturer_id,
+                    "lecturer":    gl.lecturer.to_dict() if gl.lecturer else None,
+                }
+                for gl in self.group_lecturers
+            },
+        }
+
+
+class CourseGroupLecturer(db.Model):
+    """
+    Per-(course, student_group) lecturer override.
+    When the same course is taught to multiple groups by *different* lecturers,
+    add a row here for each group that has a non-default lecturer.
+    Falls back to Course.lecturer_id when no row exists for a (course, group) pair.
+    """
+    __tablename__ = "course_group_lecturers"
+
+    course_id        = db.Column(db.String(36), db.ForeignKey("courses.id",        ondelete="CASCADE"),   primary_key=True)
+    student_group_id = db.Column(db.String(36), db.ForeignKey("student_groups.id", ondelete="CASCADE"),   primary_key=True)
+    lecturer_id      = db.Column(db.String(36), db.ForeignKey("lecturers.id",      ondelete="SET NULL"),  nullable=True)
+
+    course        = db.relationship("Course",        back_populates="group_lecturers")
+    student_group = db.relationship("StudentGroup")
+    lecturer      = db.relationship("Lecturer")
+
+    def to_dict(self):
+        return {
+            "course_id":        self.course_id,
+            "student_group_id": self.student_group_id,
+            "lecturer_id":      self.lecturer_id,
+            "lecturer":         self.lecturer.to_dict() if self.lecturer else None,
         }
 
 

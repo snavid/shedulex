@@ -3,13 +3,18 @@ import { ref, computed, onMounted } from "vue"
 import { useTimetableStore } from "@/stores/timetable"
 import { useAuthStore } from "@/stores/auth"
 import { getErrorMessage } from "@/api/client"
+import { useToast } from "vue-toastification"
 
 const store = useTimetableStore()
-const auth = useAuthStore()
-const loading = ref(true)
-const statusFilter = ref("")
-const search = ref("")
-const error = ref("")
+const auth  = useAuthStore()
+const toast = useToast()
+
+const loading       = ref(true)
+const statusFilter  = ref("")
+const search        = ref("")
+const error         = ref("")
+const confirmDelete = ref(null)   // timetable object pending deletion
+const deleting      = ref(false)
 
 onMounted(async () => {
   loading.value = true
@@ -24,11 +29,11 @@ onMounted(async () => {
 })
 
 const STATUS_COLORS = {
-  active: "badge-success",
-  draft: "badge-warning",
+  active:     "badge-success",
+  draft:      "badge-warning",
   generating: "badge-info",
-  failed: "badge-error",
-  archived: "badge bg-gray-100 text-gray-600",
+  failed:     "badge-error",
+  archived:   "badge bg-gray-100 text-gray-600",
 }
 
 const filtered = computed(() => {
@@ -49,12 +54,26 @@ const filtered = computed(() => {
 const counts = computed(() => {
   const all = store.timetables
   return {
-    total: all.length,
-    active: all.filter((t) => t.status === "active").length,
-    draft: all.filter((t) => t.status === "draft").length,
+    total:      all.length,
+    active:     all.filter((t) => t.status === "active").length,
+    draft:      all.filter((t) => t.status === "draft").length,
     generating: all.filter((t) => t.status === "generating").length,
   }
 })
+
+async function doDelete() {
+  if (!confirmDelete.value) return
+  deleting.value = true
+  try {
+    await store.deleteTimetable(confirmDelete.value.id)
+    toast.success(`"${confirmDelete.value.name}" deleted.`)
+    confirmDelete.value = null
+  } catch (e) {
+    toast.error(getErrorMessage(e, "Failed to delete timetable."))
+  } finally {
+    deleting.value = false
+  }
+}
 </script>
 
 <template>
@@ -154,40 +173,128 @@ const counts = computed(() => {
 
     <!-- Timetable list -->
     <div v-else class="space-y-3">
-      <RouterLink
+      <div
         v-for="tt in filtered"
         :key="tt.id"
-        :to="`/timetable/${tt.id}`"
-        class="card flex items-center gap-4 hover:shadow-md transition-all hover:-translate-y-0.5 cursor-pointer"
+        class="card flex items-center gap-4 hover:shadow-md transition-all hover:-translate-y-0.5"
       >
-        <div class="w-12 h-12 rounded-xl flex-shrink-0 flex items-center justify-center"
-          :class="tt.status === 'active' ? 'bg-blue-100' : tt.status === 'failed' ? 'bg-red-100' : 'bg-gray-100'">
-          <svg class="w-6 h-6" :class="tt.status === 'active' ? 'text-blue-600' : tt.status === 'failed' ? 'text-red-500' : 'text-gray-400'"
-            fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-        </div>
-        <div class="flex-1 min-w-0">
-          <h3 class="font-semibold text-gray-900 truncate">{{ tt.name }}</h3>
-          <p class="text-sm text-gray-500">
-            {{ tt.department?.name || "—" }}
-            <span v-if="tt.semester"> · Semester {{ tt.semester }}</span>
-            <span v-if="tt.academic_year"> · {{ tt.academic_year }}</span>
-          </p>
-        </div>
-        <div class="flex items-center gap-4 flex-shrink-0">
+        <!-- Clickable area → navigate to detail -->
+        <RouterLink
+          :to="`/timetable/${tt.id}`"
+          class="flex items-center gap-4 flex-1 min-w-0 cursor-pointer"
+        >
+          <div class="w-12 h-12 rounded-xl flex-shrink-0 flex items-center justify-center"
+            :class="tt.status === 'active' ? 'bg-blue-100' : tt.status === 'failed' ? 'bg-red-100' : 'bg-gray-100'">
+            <svg class="w-6 h-6"
+              :class="tt.status === 'active' ? 'text-blue-600' : tt.status === 'failed' ? 'text-red-500' : 'text-gray-400'"
+              fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <div class="min-w-0">
+            <h3 class="font-semibold text-gray-900 truncate">{{ tt.name }}</h3>
+            <p class="text-sm text-gray-500">
+              {{ tt.department?.name || "—" }}
+              <span v-if="tt.semester"> · Semester {{ tt.semester }}</span>
+              <span v-if="tt.academic_year"> · {{ tt.academic_year }}</span>
+            </p>
+          </div>
+        </RouterLink>
+
+        <!-- Right-side meta + actions -->
+        <div class="flex items-center gap-3 flex-shrink-0">
           <div class="text-right hidden md:block">
-            <p class="text-sm font-bold" :class="tt.fitness_score >= 0.8 ? 'text-green-600' : tt.fitness_score >= 0.5 ? 'text-amber-600' : 'text-gray-400'">
+            <p class="text-sm font-bold"
+               :class="tt.fitness_score >= 0.8 ? 'text-green-600' : tt.fitness_score >= 0.5 ? 'text-amber-600' : 'text-gray-400'">
               {{ tt.fitness_score ? (tt.fitness_score * 100).toFixed(1) + "%" : "—" }}
             </p>
             <p class="text-xs text-gray-400">fitness</p>
           </div>
           <span :class="STATUS_COLORS[tt.status] || 'badge-info'">{{ tt.status }}</span>
-          <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
+
+          <!-- Delete button — only for admins / timetable officers -->
+          <button
+            v-if="auth.isTimetableOfficer"
+            @click="confirmDelete = tt"
+            class="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+            title="Delete timetable"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+
+          <RouterLink :to="`/timetable/${tt.id}`">
+            <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </RouterLink>
         </div>
-      </RouterLink>
+      </div>
     </div>
   </div>
+
+  <!-- ── Delete confirmation modal ─────────────────────────────────────────── -->
+  <Teleport to="body">
+    <Transition name="fade">
+      <div v-if="confirmDelete"
+           class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+           @click.self="confirmDelete = null">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+          <!-- Modal header -->
+          <div class="p-5 bg-gradient-to-r from-red-500 to-red-600 text-white">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <div>
+                <h3 class="font-bold text-lg">Delete Timetable</h3>
+                <p class="text-red-100 text-sm">This action cannot be undone</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modal body -->
+          <div class="p-5 space-y-4">
+            <p class="text-gray-700">
+              Are you sure you want to permanently delete
+              <strong class="text-gray-900">{{ confirmDelete.name }}</strong>?
+            </p>
+            <div class="bg-gray-50 rounded-xl p-3 text-sm text-gray-500 space-y-1">
+              <p><span class="font-medium text-gray-700">Department:</span> {{ confirmDelete.department?.name || "—" }}</p>
+              <p><span class="font-medium text-gray-700">Semester:</span> {{ confirmDelete.semester }}</p>
+              <p><span class="font-medium text-gray-700">Academic year:</span> {{ confirmDelete.academic_year }}</p>
+              <p><span class="font-medium text-gray-700">Status:</span> {{ confirmDelete.status }}</p>
+            </div>
+            <p class="text-xs text-red-600 font-medium">
+              ⚠ All timetable entries, version snapshots, and export history will be permanently removed.
+            </p>
+          </div>
+
+          <!-- Modal footer -->
+          <div class="px-5 pb-5 flex items-center justify-end gap-3">
+            <button class="btn-secondary" :disabled="deleting" @click="confirmDelete = null">
+              Cancel
+            </button>
+            <button
+              class="btn px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold text-sm transition-colors disabled:opacity-50"
+              :disabled="deleting"
+              @click="doDelete"
+            >
+              {{ deleting ? "Deleting…" : "Delete Timetable" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
+
+<style scoped>
+.fade-enter-active, .fade-leave-active { transition: opacity 0.15s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+</style>

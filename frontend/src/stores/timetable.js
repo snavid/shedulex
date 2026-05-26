@@ -73,6 +73,12 @@ export const useTimetableStore = defineStore("timetable", () => {
     return data.data
   }
 
+  async function deleteTimetable(id) {
+    await timetableApi.delete(id)
+    timetables.value = timetables.value.filter(t => t.id !== id)
+    if (currentTimetable.value?.id === id) currentTimetable.value = null
+  }
+
   function setCurrentTimetable(data) {
     currentTimetable.value = data
   }
@@ -94,6 +100,6 @@ export const useTimetableStore = defineStore("timetable", () => {
     courses, constraints, conflicts, isGenerating,
     fetchTimetables, fetchTimetable, generateTimetable, detectConflicts,
     swapEntries, fetchDepartments, fetchRooms, fetchLecturers, fetchCourses,
-    setCurrentTimetable, clearAll,
+    deleteTimetable, setCurrentTimetable, clearAll,
   }
 })

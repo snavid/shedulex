@@ -85,6 +85,7 @@ export const timetableApi = {
   substituteLecturer: (timetableId, data) =>
     api.post(`/timetable/${timetableId}/substitute-lecturer`, data),
   archive: (timetableId) => api.patch(`/timetable/${timetableId}/archive`),
+  delete: (timetableId) => api.delete(`/timetable/${timetableId}`),
   listVersions: (timetableId) => api.get(`/timetable/${timetableId}/versions`),
   createVersion: (timetableId, data) => api.post(`/timetable/${timetableId}/versions`, data),
   restoreVersion: (snapshotId) => api.post(`/timetable/versions/${snapshotId}/restore`),
@@ -132,6 +133,11 @@ export const resourcesApi = {
   getCourseGroups: (id) => api.get(`/courses/${id}/groups`),
   setCourseGroups: (id, groupIds) => api.post(`/courses/${id}/groups`, { group_ids: groupIds }),
   removeCourseGroup: (courseId, groupId) => api.delete(`/courses/${courseId}/groups/${groupId}`),
+  // Per-group lecturer overrides
+  setGroupLecturer: (courseId, groupId, lecturerId) =>
+    api.put(`/courses/${courseId}/groups/${groupId}/lecturer`, { lecturer_id: lecturerId }),
+  removeGroupLecturer: (courseId, groupId) =>
+    api.delete(`/courses/${courseId}/groups/${groupId}/lecturer`),
   // Constraints
   constraints: (params) => api.get("/constraints", { params }),
   createConstraint: (data) => api.post("/constraints", data),

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue"
-import { useRoute } from "vue-router"
+import { useRoute, useRouter } from "vue-router"
 import { useToast } from "vue-toastification"
 
 import { documentApi, getErrorMessage, notificationApi, resourcesApi, timetableApi } from "@/api/client"
@@ -8,14 +8,17 @@ import { useTimetableStore } from "@/stores/timetable"
 import { useAuthStore } from "@/stores/auth"
 import AIAssistantPanel from "@/components/AIAssistantPanel.vue"
 
-const route = useRoute()
-const store = useTimetableStore()
-const auth = useAuthStore()
-const toast = useToast()
+const route  = useRoute()
+const router = useRouter()
+const store  = useTimetableStore()
+const auth   = useAuthStore()
+const toast  = useToast()
 
-const aiPanel = ref(null)
-const loading = ref(true)
+const aiPanel       = ref(null)
+const loading       = ref(true)
 const conflictsLoading = ref(false)
+const showDeleteModal = ref(false)
+const deleting      = ref(false)
 const violationsLoading = ref(false)
 const violations = ref([])
 const showViolationsPanel = ref(false)
@@ -558,6 +561,19 @@ async function loadTimetablePage(id) {
 }
 
 watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
+
+async function doDelete() {
+  deleting.value = true
+  try {
+    await store.deleteTimetable(route.params.id)
+    toast.success("Timetable deleted.")
+    router.push("/timetable")
+  } catch (e) {
+    toast.error(getErrorMessage(e, "Failed to delete timetable."))
+    deleting.value = false
+    showDeleteModal.value = false
+  }
+}
 </script>
 
 <template>
@@ -601,6 +617,17 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
           </button>
           <button @click="aiPanel?.open()" class="btn-secondary text-sm flex items-center gap-1.5">
             <span class="text-violet-500">✦</span> AI Assist
+          </button>
+          <button
+            v-if="auth.isTimetableOfficer"
+            @click="showDeleteModal = true"
+            class="btn text-sm flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 transition-colors font-medium"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            Delete
           </button>
         </div>
       </div>
@@ -1174,6 +1201,53 @@ watch(() => route.params.id, (id) => loadTimetablePage(id), { immediate: true })
       </Transition>
     </Teleport>
   </div>
+
+  <!-- ── Delete confirmation modal ─────────────────────────────────────────── -->
+  <Teleport to="body">
+    <Transition name="modal-fade">
+      <div v-if="showDeleteModal"
+           class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+           @click.self="showDeleteModal = false">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+          <div class="p-5 bg-gradient-to-r from-red-500 to-red-600 text-white">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <div>
+                <h3 class="font-bold text-lg">Delete Timetable</h3>
+                <p class="text-red-100 text-sm">This action cannot be undone</p>
+              </div>
+            </div>
+          </div>
+          <div class="p-5 space-y-4">
+            <p class="text-gray-700">
+              Are you sure you want to permanently delete
+              <strong class="text-gray-900">{{ store.currentTimetable?.name }}</strong>?
+            </p>
+            <p class="text-xs text-red-600 font-medium">
+              ⚠ All timetable entries, version snapshots, and export history will be permanently removed.
+            </p>
+          </div>
+          <div class="px-5 pb-5 flex items-center justify-end gap-3">
+            <button class="btn-secondary" :disabled="deleting" @click="showDeleteModal = false">
+              Cancel
+            </button>
+            <button
+              class="btn px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold text-sm transition-colors disabled:opacity-50"
+              :disabled="deleting"
+              @click="doDelete"
+            >
+              {{ deleting ? "Deleting…" : "Delete Timetable" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>

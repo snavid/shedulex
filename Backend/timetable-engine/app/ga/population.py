@@ -82,12 +82,19 @@ def initialize_population(
     # Expand courses into (course, group) scheduling units.
     # If a course has explicit student_group_ids, create one unit per group.
     # If not, create one unit with the pre-resolved student_group_id (may be empty).
+    # per_group_lecturer_ids overrides lecturer_id per unit so fitness evaluation
+    # uses the correct lecturer's availability constraints for each group.
     scheduling_units: list[dict] = []
     for course in sorted_courses:
         group_ids: list[str] = course.get("student_group_ids") or []
+        per_group_lec: dict[str, str] = course.get("per_group_lecturer_ids") or {}
         if group_ids:
             for gid in group_ids:
-                scheduling_units.append({**course, "student_group_id": gid})
+                unit = {**course, "student_group_id": gid}
+                # Inject the effective lecturer so fitness.py checks the right constraints
+                if per_group_lec.get(gid):
+                    unit["lecturer_id"] = per_group_lec[gid]
+                scheduling_units.append(unit)
         else:
             scheduling_units.append(course)
 

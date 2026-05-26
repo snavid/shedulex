@@ -6,7 +6,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from app.extensions import db
 import datetime as _dt
 from app.models.domain import (
-    AcademicYear, Constraint, Course, Department, Lecturer, Program,
+    AcademicYear, Constraint, Course, CourseGroupLecturer, Department, Lecturer, Program,
     Room, StudentGroup, TimeSlot, TimetableTemplate, TemplateTimeBlock,
     TimetableEntry, University,
 )
@@ -522,6 +522,54 @@ def remove_course_group(course_id, group_id):
         course.student_groups.remove(group)
         db.session.commit()
     return ok(message="Group removed from course.")
+
+
+# ── Per-group lecturer overrides ─────────────────────────────────────────────
+@resources_bp.put("/courses/<course_id>/groups/<group_id>/lecturer")
+@service_or_jwt_required(*WRITE_ROLES)
+def set_group_lecturer(course_id, group_id):
+    """
+    Upsert a per-group lecturer override for one (course, student_group) pair.
+    lecturer_id = a UUID  → assign that lecturer to this group only.
+    lecturer_id = null    → explicitly mark this group as unassigned (overrides
+                            Course.lecturer_id so the task appears in Unassigned).
+    Use DELETE (remove_group_lecturer) to remove the override entirely and fall
+    back to Course.lecturer_id.
+    """
+    body = json_body()
+    raw = body.get("lecturer_id")
+    lecturer_id = None if (raw is None or raw == "") else raw
+
+    cgl = CourseGroupLecturer.query.filter_by(
+        course_id=course_id, student_group_id=group_id
+    ).first()
+
+    # Always upsert — a null lecturer_id is a valid "explicitly unassigned" state.
+    if cgl:
+        cgl.lecturer_id = lecturer_id
+    else:
+        db.session.add(CourseGroupLecturer(
+            course_id=course_id,
+            student_group_id=group_id,
+            lecturer_id=lecturer_id,
+        ))
+
+    db.session.commit()
+    course = Course.query.get_or_404(course_id)
+    return ok(data=course.to_dict())
+
+
+@resources_bp.delete("/courses/<course_id>/groups/<group_id>/lecturer")
+@service_or_jwt_required(*WRITE_ROLES)
+def remove_group_lecturer(course_id, group_id):
+    """Remove the per-group lecturer override; the course falls back to Course.lecturer_id."""
+    cgl = CourseGroupLecturer.query.filter_by(
+        course_id=course_id, student_group_id=group_id
+    ).first()
+    if cgl:
+        db.session.delete(cgl)
+        db.session.commit()
+    return ok(message="Per-group lecturer override removed.")
 
 
 # Substitute a sick/absent lecturer across all entries in a timetable

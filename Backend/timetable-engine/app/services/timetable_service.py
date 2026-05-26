@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.extensions import db
 from app.models.domain import (
-    Constraint, Course, Department, Lecturer, Program, Room, StudentGroup,
+    Constraint, Course, CourseGroupLecturer, Department, Lecturer, Program, Room, StudentGroup,
     TimeSlot, Timetable, TimetableEntry, TimetableSnapshot, TimetableTemplate,
 )
 from app.ga import run_ga, GAConfig
@@ -62,8 +62,24 @@ def generate_timetable(
     db_constraints_raw = constraint_q.all()
     db_constraints_data = [c.to_dict() for c in db_constraints_raw]
 
+    # Load per-group lecturer overrides for these courses.
+    # Include rows where lecturer_id IS NULL — those represent "explicitly unassigned"
+    # for that (course, group) pair (overrides Course.lecturer_id).
+    # Sentinel _NO_OVERRIDE is used below to distinguish "no row" from "row with null".
+    _NO_OVERRIDE = object()
+    course_ids = [c.id for c in courses]
+    _override_rows = CourseGroupLecturer.query.filter(
+        CourseGroupLecturer.course_id.in_(course_ids)
+    ).all()
+    # Map key present → override exists (lecturer_id may be None = explicitly unassigned)
+    group_lecturer_overrides: dict[tuple[str, str], str | None] = {
+        (gl.course_id, gl.student_group_id): gl.lecturer_id
+        for gl in _override_rows
+    }
+
     # Serialise domain objects → plain dicts for GA layer.
     # student_group_ids: explicit assignments take priority; fall back to program-inferred group.
+    # per_group_lecturer_ids: effective lecturer per group (override → course default).
     courses_data = []
     for c in courses:
         explicit_groups = [g.id for g in (c.student_groups or [])]
@@ -74,6 +90,16 @@ def generate_timetable(
             "student_count": c.student_count,
             "student_group_id": _resolve_student_group(c) if not explicit_groups else explicit_groups[0],
             "student_group_ids": explicit_groups,  # GA population uses this to explode by group
+            # Effective lecturer per group — GA population.py injects this per scheduling unit.
+            # If an override row exists (even with lecturer_id=None), that wins over course default.
+            "per_group_lecturer_ids": {
+                gid: (
+                    group_lecturer_overrides[(c.id, gid)]   # may be None (explicit unassign)
+                    if (c.id, gid) in group_lecturer_overrides
+                    else c.lecturer_id                       # no override → course default
+                )
+                for gid in explicit_groups
+            },
             "requires_lab": c.requires_lab,
             "weekly_hours": c.weekly_hours,
             "department_id": c.department_id,
@@ -168,10 +194,18 @@ def generate_timetable(
     lecturer_by_course = {c.id: c.lecturer_id for c in courses}
 
     for gene in result.best_chromosome.genes:
+        # Per-group override takes priority over the course-level default.
+        # A null override (explicit unassign) is kept as-is rather than falling
+        # back to the course default.
+        key = (gene.course_id, gene.student_group_id or "")
+        if key in group_lecturer_overrides:
+            effective_lecturer_id = group_lecturer_overrides[key]   # may be None
+        else:
+            effective_lecturer_id = lecturer_by_course.get(gene.course_id)
         entry = TimetableEntry(
             timetable_id=timetable.id,
             course_id=gene.course_id,
-            lecturer_id=lecturer_by_course.get(gene.course_id),
+            lecturer_id=effective_lecturer_id,
             room_id=gene.room_id,
             time_slot_id=gene.time_slot_id,
             student_group_id=gene.student_group_id or None,
