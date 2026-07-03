@@ -100,7 +100,8 @@ def swap_entries():
         return fail("entry1_id and entry2_id required.", status=422)
 
     try:
-        e1, e2 = timetable_service.swap_entries(e1_id, e2_id)
+        actor = body.get("triggered_by") if is_internal_request() else get_jwt_identity()
+        e1, e2 = timetable_service.swap_entries(e1_id, e2_id, triggered_by=actor)
     except ValueError as ex:
         return fail(str(ex), status=400)
 
@@ -117,7 +118,8 @@ def move_entry(entry_id):
         return fail("time_slot_id is required.", status=422)
 
     try:
-        entry = timetable_service.move_entry_to_slot(entry_id, slot_id)
+        actor = body.get("triggered_by") if is_internal_request() else get_jwt_identity()
+        entry = timetable_service.move_entry_to_slot(entry_id, slot_id, triggered_by=actor)
     except ValueError as ex:
         return fail(str(ex), status=400)
 

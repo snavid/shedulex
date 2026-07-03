@@ -284,6 +284,10 @@ def generate_timetable(
         db.session.rollback()
         raise RuntimeError(f"Failed to save timetable results: {exc}") from exc
 
+    from app.services.notification_client import emit_timetable_event
+    from app.services.timetable_events import base_event
+    emit_timetable_event(base_event(timetable, "generated", triggered_by=created_by))
+
     return timetable
 
 
@@ -348,9 +352,15 @@ def list_timetables(
     return q.order_by(Timetable.created_at.desc()).all()
 
 
-def swap_entries(entry1_id: str, entry2_id: str) -> tuple:
-    e1 = TimetableEntry.query.get(entry1_id)
-    e2 = TimetableEntry.query.get(entry2_id)
+def swap_entries(entry1_id: str, entry2_id: str, triggered_by: str | None = None) -> tuple:
+    load_opts = (
+        joinedload(TimetableEntry.course),
+        joinedload(TimetableEntry.time_slot),
+        joinedload(TimetableEntry.room),
+        joinedload(TimetableEntry.lecturer),
+    )
+    e1 = TimetableEntry.query.options(*load_opts).get(entry1_id)
+    e2 = TimetableEntry.query.options(*load_opts).get(entry2_id)
     if not e1 or not e2:
         raise ValueError("One or both entries not found.")
     if e1.timetable_id != e2.timetable_id:
@@ -358,13 +368,42 @@ def swap_entries(entry1_id: str, entry2_id: str) -> tuple:
     if e1.is_locked or e2.is_locked:
         raise ValueError("Cannot move locked entries.")
 
+    from app.services.timetable_events import change_from_entry, slot_payload, base_event
+    from app.services.notification_client import emit_timetable_event
+
+    old_slot_e1 = slot_payload(e1)
+    old_slot_e2 = slot_payload(e2)
+
     e1.time_slot_id, e2.time_slot_id = e2.time_slot_id, e1.time_slot_id
     db.session.commit()
+
+    db.session.refresh(e1)
+    db.session.refresh(e2)
+    timetable = Timetable.query.get(e1.timetable_id)
+    if timetable:
+        emit_timetable_event(base_event(
+            timetable,
+            "entry_swapped",
+            triggered_by=triggered_by,
+            changes=[
+                change_from_entry(e1, old_slot=old_slot_e1),
+                change_from_entry(e2, old_slot=old_slot_e2),
+            ],
+        ))
     return e1, e2
 
 
-def move_entry_to_slot(entry_id: str, time_slot_id: str) -> TimetableEntry:
-    entry = TimetableEntry.query.get(entry_id)
+def move_entry_to_slot(entry_id: str, time_slot_id: str, triggered_by: str | None = None) -> TimetableEntry:
+    entry = (
+        TimetableEntry.query
+        .options(
+            joinedload(TimetableEntry.course),
+            joinedload(TimetableEntry.time_slot),
+            joinedload(TimetableEntry.room),
+            joinedload(TimetableEntry.lecturer),
+        )
+        .get(entry_id)
+    )
     if not entry:
         raise ValueError("Entry not found.")
     if entry.is_locked:
@@ -378,6 +417,11 @@ def move_entry_to_slot(entry_id: str, time_slot_id: str) -> TimetableEntry:
 
     if entry.time_slot_id == time_slot_id:
         return entry
+
+    from app.services.timetable_events import change_from_entry, slot_payload, base_event
+    from app.services.notification_client import emit_timetable_event
+
+    old_slot = slot_payload(entry)
 
     timetable_id = entry.timetable_id
     others = (
@@ -408,6 +452,23 @@ def move_entry_to_slot(entry_id: str, time_slot_id: str) -> TimetableEntry:
     if timetable:
         timetable.version = (timetable.version or 1) + 1
     db.session.commit()
+    entry = (
+        TimetableEntry.query
+        .options(
+            joinedload(TimetableEntry.course),
+            joinedload(TimetableEntry.time_slot),
+            joinedload(TimetableEntry.room),
+            joinedload(TimetableEntry.lecturer),
+        )
+        .get(entry_id)
+    )
+    if timetable:
+        emit_timetable_event(base_event(
+            timetable,
+            "entry_moved",
+            triggered_by=triggered_by,
+            changes=[change_from_entry(entry, old_slot=old_slot)],
+        ))
     return entry
 
 
@@ -655,6 +716,14 @@ def restore_snapshot(snapshot_id: str) -> Timetable:
 
     timetable.version = (timetable.version or 1) + 1
     db.session.commit()
+
+    from app.services.notification_client import emit_timetable_event
+    from app.services.timetable_events import base_event
+    emit_timetable_event(base_event(
+        timetable,
+        "restored",
+        changes=[{"snapshot_id": snapshot.id, "snapshot_notes": snapshot.notes}],
+    ))
     return timetable
 
 

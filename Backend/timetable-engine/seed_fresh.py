@@ -428,6 +428,7 @@ def seed():
 
         # ── Lecturers ────────────────────────────────────────────────────────
         print("Creating lecturers…")
+        lect_phone_counter = 800
         for uni_code, lects in LECTURERS_PER_UNI.items():
             # Assign to first department of this university
             first_dept = next(
@@ -439,6 +440,7 @@ def seed():
                 lect = Lecturer(
                     name=l["name"],
                     email=l["email"],
+                    phone=l.get("phone") or f"+255700000{lect_phone_counter:03d}",
                     staff_id=l["staff_id"],
                     specialization=l["specialization"],
                     max_hours_per_week=l["max_hours"],
@@ -447,6 +449,7 @@ def seed():
                 )
                 db.session.add(lect)
                 db.session.flush()
+                lect_phone_counter += 1
                 uni_lects.append(lect)
             lect_objects[uni_code] = uni_lects
         db.session.flush()

@@ -9,6 +9,8 @@ class Config:
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "jwt-secret-change-me")
     REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6490/0")
     INTERNAL_SERVICE_KEY = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
+    NOTIFICATION_SERVICE_URL = os.environ.get("NOTIFICATION_SERVICE_URL", "http://notification-service:5004")
+    TIMETABLE_NOTIFY_ENABLED = os.environ.get("TIMETABLE_NOTIFY_ENABLED", "true").lower() == "true"
     API_TITLE = "Shedulex Timetable Engine"
     API_VERSION = "v1"
 

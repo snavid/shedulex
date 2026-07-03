@@ -30,6 +30,9 @@ class User(db.Model):
     last_name = db.Column(db.String(100), nullable=False)
     phone = db.Column(db.String(20))
     department = db.Column(db.String(100))
+    department_id = db.Column(db.String(36))  # soft-ref to timetable departments.id
+    program_id = db.Column(db.String(36))  # soft-ref to timetable programs.id
+    student_group_id = db.Column(db.String(36))  # soft-ref to timetable student_groups.id
     staff_id = db.Column(db.String(50), unique=True)
     university_id = db.Column(db.String(36))  # soft-ref to timetable-service university
     role_id = db.Column(db.String(36), db.ForeignKey("roles.id"), nullable=False)
@@ -66,6 +69,9 @@ class User(db.Model):
             "last_name": self.last_name,
             "phone": self.phone,
             "department": self.department,
+            "department_id": self.department_id,
+            "program_id": self.program_id,
+            "student_group_id": self.student_group_id,
             "staff_id": self.staff_id,
             "university_id": self.university_id,
             "role": self.role.to_dict() if self.role else None,

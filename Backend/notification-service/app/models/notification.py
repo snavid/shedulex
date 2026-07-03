@@ -39,10 +39,14 @@ class Notification(db.Model):
     def to_dict(self):
         return {
             "id": self.id, "recipient_id": self.recipient_id,
-            "recipient_email": self.recipient_email, "channel": self.channel,
+            "recipient_email": self.recipient_email,
+            "recipient_phone": self.recipient_phone,
+            "channel": self.channel,
             "subject": self.subject, "body": self.body,
             "notification_type": self.notification_type, "status": self.status,
             "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
             "sent_at": self.sent_at.isoformat() if self.sent_at else None,
+            "error_message": self.error_message,
+            "metadata": self.metadata_ or {},
             "created_at": self.created_at.isoformat(),
         }

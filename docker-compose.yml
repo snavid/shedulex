@@ -105,14 +105,22 @@ services:
       - shedulex-net
     restart: unless-stopped
     depends_on:
-      - auth-service
-      - timetable-engine
-      - adjustment-engine
-      - notification-service
-      - calendar-service
-      - document-service
-      - analytics-service
-      - audit-service
+      auth-service:
+        condition: service_started
+      timetable-engine:
+        condition: service_started
+      adjustment-engine:
+        condition: service_started
+      notification-service:
+        condition: service_healthy
+      calendar-service:
+        condition: service_started
+      document-service:
+        condition: service_started
+      analytics-service:
+        condition: service_started
+      audit-service:
+        condition: service_started
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 15s
@@ -154,6 +162,8 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${TIMETABLE_DB:-timetable_db}
       REDIS_URL: redis://redis:6379/0
+      NOTIFICATION_SERVICE_URL: http://notification-service:5004
+      TIMETABLE_NOTIFY_ENABLED: ${TIMETABLE_NOTIFY_ENABLED:-true}
     ports:
       - "5002:5002"
     networks:
@@ -226,8 +236,23 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${NOTIFICATION_DB:-notification_db}
       REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      AUTH_SERVICE_URL: http://auth-service:5001
+      TIMETABLE_SERVICE_URL: http://timetable-engine:5002
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      TIMETABLE_NOTIFY_ENABLED: ${TIMETABLE_NOTIFY_ENABLED:-true}
+      TIMETABLE_EVENT_DEBOUNCE_SECONDS: ${TIMETABLE_EVENT_DEBOUNCE_SECONDS:-60}
+      CALENDAR_SERVICE_URL: http://calendar-service:5005
+      BEEM_API_KEY: ${BEEM_API_KEY:-}
+      BEEM_SECRET_KEY: ${BEEM_SECRET_KEY:-}
+      BEEM_SENDER_NAME: ${BEEM_SENDER_NAME:-SHEDULEX}
+      DEFAULT_SMS_PHONE: ${DEFAULT_SMS_PHONE:-+255749300606}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-jwt-secret-change-me}
+      JWT_ISSUER: ${JWT_ISSUER:-shedulex}
     ports:
       - "5004:5004"
+    restart: unless-stopped
     networks:
       - shedulex-net
     depends_on:
@@ -235,6 +260,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5004/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   notification-worker:
     build:
@@ -246,6 +277,18 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${NOTIFICATION_DB:-notification_db}
       REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      AUTH_SERVICE_URL: http://auth-service:5001
+      TIMETABLE_SERVICE_URL: http://timetable-engine:5002
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      TIMETABLE_NOTIFY_ENABLED: ${TIMETABLE_NOTIFY_ENABLED:-true}
+      TIMETABLE_EVENT_DEBOUNCE_SECONDS: ${TIMETABLE_EVENT_DEBOUNCE_SECONDS:-60}
+      CALENDAR_SERVICE_URL: http://calendar-service:5005
+      BEEM_API_KEY: ${BEEM_API_KEY:-}
+      BEEM_SECRET_KEY: ${BEEM_SECRET_KEY:-}
+      BEEM_SENDER_NAME: ${BEEM_SENDER_NAME:-SHEDULEX}
+      DEFAULT_SMS_PHONE: ${DEFAULT_SMS_PHONE:-+255749300606}
     networks:
       - shedulex-net
     depends_on:
@@ -264,6 +307,18 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${NOTIFICATION_DB:-notification_db}
       REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      AUTH_SERVICE_URL: http://auth-service:5001
+      TIMETABLE_SERVICE_URL: http://timetable-engine:5002
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      TIMETABLE_NOTIFY_ENABLED: ${TIMETABLE_NOTIFY_ENABLED:-true}
+      TIMETABLE_EVENT_DEBOUNCE_SECONDS: ${TIMETABLE_EVENT_DEBOUNCE_SECONDS:-60}
+      CALENDAR_SERVICE_URL: http://calendar-service:5005
+      BEEM_API_KEY: ${BEEM_API_KEY:-}
+      BEEM_SECRET_KEY: ${BEEM_SECRET_KEY:-}
+      BEEM_SENDER_NAME: ${BEEM_SENDER_NAME:-SHEDULEX}
+      DEFAULT_SMS_PHONE: ${DEFAULT_SMS_PHONE:-+255749300606}
     networks:
       - shedulex-net
     depends_on:
@@ -278,6 +333,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${CALENDAR_DB:-calendar_db}
       REDIS_URL: redis://redis:6379/0
+      NOTIFICATION_SERVICE_URL: http://notification-service:5004
     ports:
       - "5005:5005"
     networks:

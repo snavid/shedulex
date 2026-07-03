@@ -21,6 +21,21 @@ TIMETABLE_URL = os.environ.get("TIMETABLE_SERVICE_URL", "http://timetable-engine
 INTERNAL_KEY  = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
 
 
+def _resolve_department_name(department_id: str) -> str | None:
+    """Fetch department name from timetable-engine for display on user profile."""
+    req = urllib.request.Request(
+        f"{TIMETABLE_URL}/api/v1/departments/{department_id}",
+        headers={"X-Internal-Service-Key": INTERNAL_KEY},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read())
+            return (body.get("data") or {}).get("name")
+    except Exception:
+        current_app.logger.warning("Could not resolve department name for %s.", department_id)
+        return None
+
+
 def _resolve_university_id(university_id: str | None, university_name: str | None, university_code: str | None) -> str | None:
     """
     Return a university_id.
@@ -109,13 +124,21 @@ def register_user(data: dict) -> tuple[User, dict | None]:
     # All other self-registrations require admin approval before the account can be used.
     self_approve = role.name in SELF_APPROVE_ROLES
     verification_token = secrets.token_urlsafe(32)
+    department_name = data.get("department")
+    department_id = data.get("department_id")
+    if department_id and not department_name:
+        department_name = _resolve_department_name(department_id)
+
     user = User(
         email=data["email"],
         username=data["username"],
         first_name=data["first_name"],
         last_name=data["last_name"],
         phone=data.get("phone"),
-        department=data.get("department"),
+        department=department_name,
+        department_id=department_id,
+        program_id=data.get("program_id"),
+        student_group_id=data.get("student_group_id"),
         staff_id=data.get("staff_id"),
         university_id=university_id,
         role_id=role.id,
@@ -243,6 +266,9 @@ def create_lecturer_account(data: dict) -> tuple[User, str]:
     email = data["email"]
     first_name = data["first_name"]
     last_name = data["last_name"]
+    phone = data.get("phone")
+    if not phone:
+        raise ValueError("Phone number is required for lecturer accounts.")
 
     if User.query.filter_by(email=email).first():
         raise ValueError(f"A user with email '{email}' already exists.")

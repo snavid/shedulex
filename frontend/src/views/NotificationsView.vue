@@ -1,23 +1,46 @@
 <script setup>
-import { onMounted, ref, reactive } from "vue"
-import { notificationApi, getErrorMessage } from "@/api/client"
+import { computed, onMounted, reactive, ref, watch } from "vue"
+import { useAuthStore } from "@/stores/auth"
+import { notificationApi, resourcesApi, getErrorMessage } from "@/api/client"
 import { useToast } from "vue-toastification"
 
+const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(true)
 const sending = ref(false)
 const notifications = ref([])
-const activeTab = ref("send")
+const activeTab = ref("broadcast")
+
+const departments = ref([])
+const programs = ref([])
 
 const form = reactive({
-  recipient_id: "",
-  email: "",
-  phone: "",
-  channel: "email",
+  audience: "students",
+  department_id: "",
+  program_id: "",
+  channel: "sms",
   subject: "",
   body: "",
-  notification_type: "general",
-  scheduled_at: "",
+})
+
+const showFilters = computed(() => ["students", "lecturers", "hod"].includes(form.audience))
+
+async function loadDepartments() {
+  if (!auth.user?.university_id) return
+  try {
+    const { data } = await resourcesApi.departments({ university_id: auth.user.university_id })
+    departments.value = data.data || []
+  } catch {}
+}
+
+watch(() => form.department_id, async (deptId) => {
+  programs.value = []
+  form.program_id = ""
+  if (!deptId) return
+  try {
+    const { data } = await resourcesApi.programs({ department_id: deptId })
+    programs.value = data.data || []
+  } catch {}
 })
 
 async function loadNotifications() {
@@ -32,23 +55,34 @@ async function loadNotifications() {
   }
 }
 
-async function sendNotification() {
+async function sendBroadcast() {
   if (!form.subject || !form.body) {
     toast.error("Subject and message are required.")
     return
   }
   sending.value = true
   try {
-    await notificationApi.send({
-      ...form,
-      scheduled_at: form.scheduled_at || undefined,
+    await notificationApi.broadcast({
+      subject: form.subject,
+      body: form.body,
+      audience: form.audience,
+      channel: form.channel,
+      department_id: form.department_id || undefined,
+      program_id: form.program_id || undefined,
     })
-    toast.success("Notification sent.")
-    Object.assign(form, { recipient_id: "", email: "", phone: "", channel: "email", subject: "", body: "", notification_type: "general", scheduled_at: "" })
+    toast.success("Broadcast queued. Messages will be sent shortly.")
+    Object.assign(form, {
+      audience: "students",
+      department_id: "",
+      program_id: "",
+      channel: "sms",
+      subject: "",
+      body: "",
+    })
     activeTab.value = "history"
     await loadNotifications()
   } catch (e) {
-    toast.error(getErrorMessage(e, "Failed to send notification."))
+    toast.error(getErrorMessage(e, "Failed to queue broadcast."))
   } finally {
     sending.value = false
   }
@@ -57,16 +91,14 @@ async function sendNotification() {
 function statusColor(status) {
   const map = {
     sent: "badge-success",
-    delivered: "badge-success",
     pending: "badge-warning",
     failed: "badge-error",
-    scheduled: "badge-info",
   }
   return map[status] || "badge-info"
 }
 
 function channelIcon(channel) {
-  const map = { email: "📧", sms: "💬", both: "📨", push: "🔔" }
+  const map = { email: "📧", sms: "💬", both: "📨" }
   return map[channel] || "📩"
 }
 
@@ -77,26 +109,27 @@ function formatDate(dt) {
   })
 }
 
-onMounted(loadNotifications)
+onMounted(async () => {
+  await loadDepartments()
+  await loadNotifications()
+})
 </script>
 
 <template>
   <div class="space-y-6">
-    <!-- Header -->
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-bold text-gray-900">Notifications</h1>
-        <p class="text-sm text-gray-500 mt-1">Send reminders, announcements, and track delivery history.</p>
+        <p class="text-sm text-gray-500 mt-1">Broadcast SMS and email announcements to your university audience.</p>
       </div>
       <button @click="loadNotifications" class="btn-secondary text-sm" :disabled="loading">
         Refresh
       </button>
     </div>
 
-    <!-- Tabs -->
     <div class="flex border-b border-gray-200 gap-1">
       <button
-        v-for="tab in [{ id: 'send', label: 'Send Notification' }, { id: 'history', label: `History (${notifications.length})` }]"
+        v-for="tab in [{ id: 'broadcast', label: 'Broadcast' }, { id: 'history', label: `History (${notifications.length})` }]"
         :key="tab.id"
         @click="activeTab = tab.id"
         :class="[
@@ -108,82 +141,72 @@ onMounted(loadNotifications)
       >{{ tab.label }}</button>
     </div>
 
-    <!-- Send tab -->
-    <div v-if="activeTab === 'send'" class="card space-y-4">
-      <h2 class="font-semibold text-gray-900">Compose Notification</h2>
+    <div v-if="activeTab === 'broadcast'" class="card space-y-4">
+      <h2 class="font-semibold text-gray-900">Broadcast Announcement</h2>
 
       <div class="grid md:grid-cols-2 gap-4">
         <div>
-          <label class="label">Notification Type</label>
-          <select v-model="form.notification_type" class="input">
-            <option value="general">General</option>
-            <option value="reminder">Reminder</option>
-            <option value="announcement">Announcement</option>
-            <option value="alert">Alert</option>
-            <option value="class_update">Class Update</option>
+          <label class="label">Audience</label>
+          <select v-model="form.audience" class="input">
+            <option value="students">All Students</option>
+            <option value="lecturers">All Lecturers</option>
+            <option value="hod">Heads of Department</option>
+            <option value="all">All Users</option>
           </select>
         </div>
         <div>
           <label class="label">Channel</label>
           <select v-model="form.channel" class="input">
-            <option value="email">📧 Email only</option>
-            <option value="sms">💬 SMS only</option>
-            <option value="both">📨 Email + SMS</option>
+            <option value="sms">SMS only</option>
+            <option value="email">Email only</option>
+            <option value="both">Email + SMS</option>
           </select>
         </div>
       </div>
 
-      <div class="p-4 bg-gray-50 rounded-xl space-y-3">
-        <h3 class="text-sm font-semibold text-gray-700">Recipient</h3>
-        <div class="grid md:grid-cols-2 gap-3">
-          <div>
-            <label class="label text-xs">Email address</label>
-            <input v-model="form.email" class="input" placeholder="recipient@example.com" type="email" />
-          </div>
-          <div>
-            <label class="label text-xs">Phone number (for SMS)</label>
-            <input v-model="form.phone" class="input" placeholder="+254 7XX XXX XXX" />
-          </div>
-          <div class="md:col-span-2">
-            <label class="label text-xs">User ID (optional)</label>
-            <input v-model="form.recipient_id" class="input" placeholder="Leave blank for anonymous send" />
-          </div>
+      <div v-if="showFilters" class="grid md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-xl">
+        <div>
+          <label class="label">Department (optional filter)</label>
+          <select v-model="form.department_id" class="input">
+            <option value="">All departments</option>
+            <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
+          </select>
+        </div>
+        <div v-if="form.audience === 'students'">
+          <label class="label">Program (optional filter)</label>
+          <select v-model="form.program_id" class="input" :disabled="!form.department_id">
+            <option value="">All programs</option>
+            <option v-for="p in programs" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
         </div>
       </div>
 
       <div>
         <label class="label">Subject</label>
-        <input v-model="form.subject" class="input" placeholder="e.g. Reminder: Data Structures class at 10am" />
+        <input v-model="form.subject" class="input" placeholder="e.g. Exam schedule update" />
+        <p class="text-xs text-gray-500 mt-1">Used as the email title and prefixed in SMS (e.g. "Exam: Starts Monday").</p>
       </div>
 
       <div>
         <label class="label">Message</label>
-        <textarea v-model="form.body" rows="5" class="input" placeholder="Write your message here…"></textarea>
-      </div>
-
-      <div>
-        <label class="label">Schedule for later (optional)</label>
-        <input v-model="form.scheduled_at" type="datetime-local" class="input" />
-        <p class="text-xs text-gray-400 mt-1">Leave blank to send immediately.</p>
+        <textarea v-model="form.body" rows="5" class="input" placeholder="Write your broadcast message…"></textarea>
+        <p class="text-xs text-gray-500 mt-1">SMS sends this text; the subject above is added as a prefix when set.</p>
       </div>
 
       <div class="flex justify-end gap-3">
-        <button class="btn-secondary" @click="Object.assign(form, { email: '', phone: '', subject: '', body: '' })">
-          Clear
-        </button>
-        <button class="btn-primary" :disabled="sending" @click="sendNotification">
-          {{ sending ? "Sending…" : form.scheduled_at ? "Schedule" : "Send Now" }}
+        <button class="btn-secondary" @click="Object.assign(form, { subject: '', body: '' })">Clear</button>
+        <button class="btn-primary" :disabled="sending" @click="sendBroadcast">
+          {{ sending ? "Queuing…" : "Broadcast Now" }}
         </button>
       </div>
     </div>
 
-    <!-- History tab -->
     <div v-if="activeTab === 'history'" class="card">
       <div v-if="loading" class="text-sm text-gray-400 py-8 text-center">Loading history…</div>
       <div v-else-if="!notifications.length" class="text-sm text-gray-400 py-12 text-center">
         <p class="text-4xl mb-3">📭</p>
         <p class="font-medium">No notifications sent yet.</p>
-        <p class="mt-1">Use the Send tab to deliver your first notification.</p>
+        <p class="mt-1">Use the Broadcast tab to send your first announcement.</p>
       </div>
       <div v-else class="divide-y divide-gray-100">
         <div
@@ -196,15 +219,15 @@ onMounted(loadNotifications)
             <div class="flex items-center gap-2 flex-wrap">
               <p class="text-sm font-medium text-gray-900 truncate">{{ n.subject || "(No subject)" }}</p>
               <span :class="['badge text-xs', statusColor(n.status)]">{{ n.status }}</span>
+              <span class="text-xs text-gray-400">{{ n.notification_type }}</span>
             </div>
-            <p class="text-xs text-gray-500 mt-0.5 truncate">{{ n.body }}</p>
-            <div class="flex items-center gap-3 mt-1 text-xs text-gray-400">
-              <span>{{ n.notification_type }}</span>
-              <span>·</span>
-              <span>{{ n.channel }}</span>
-              <span>·</span>
-              <span>{{ formatDate(n.created_at) }}</span>
-            </div>
+            <p class="text-sm text-gray-600 mt-0.5 line-clamp-2">{{ n.body }}</p>
+            <p class="text-xs text-gray-400 mt-1">
+              <span v-if="n.recipient_phone">📱 {{ n.recipient_phone }}</span>
+              <span v-if="n.recipient_email"> · ✉️ {{ n.recipient_email }}</span>
+              · {{ formatDate(n.sent_at || n.created_at) }}
+            </p>
+            <p v-if="n.error_message" class="text-xs text-red-500 mt-1">{{ n.error_message }}</p>
           </div>
         </div>
       </div>

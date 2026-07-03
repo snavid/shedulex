@@ -1,4 +1,4 @@
-from marshmallow import Schema, fields, validate, validates, ValidationError
+from marshmallow import Schema, fields, validate, validates, validates_schema, ValidationError
 
 
 class RegisterSchema(Schema):
@@ -7,8 +7,11 @@ class RegisterSchema(Schema):
     password = fields.Str(required=True, validate=validate.Length(min=8), load_only=True)
     first_name = fields.Str(required=True, validate=validate.Length(min=1, max=100))
     last_name = fields.Str(required=True, validate=validate.Length(min=1, max=100))
-    phone = fields.Str(validate=validate.Length(max=20))
+    phone = fields.Str(required=True, validate=validate.Length(min=10, max=20))
     department = fields.Str(validate=validate.Length(max=100))
+    department_id = fields.Str(allow_none=True, load_default=None)
+    program_id = fields.Str(allow_none=True, load_default=None)
+    student_group_id = fields.Str(allow_none=True, load_default=None)
     staff_id = fields.Str(validate=validate.Length(max=50))
     role_name = fields.Str(load_default="student")
     # University association — provide either university_id OR university_name+code to create
@@ -22,6 +25,15 @@ class RegisterSchema(Schema):
             raise ValidationError("Password must contain at least one uppercase letter.")
         if not any(c.isdigit() for c in value):
             raise ValidationError("Password must contain at least one digit.")
+
+    @validates_schema
+    def validate_registration(self, data, **kwargs):
+        if not data.get("phone"):
+            raise ValidationError({"phone": ["Phone number is required for all accounts."]})
+        if data.get("role_name") == "student" and not data.get("program_id"):
+            raise ValidationError(
+                {"program_id": ["Program is required for student accounts."]}
+            )
 
 
 class LoginSchema(Schema):
@@ -72,7 +84,16 @@ class ChangePasswordSchema(Schema):
 
 
 class UserUpdateSchema(Schema):
+    email = fields.Email(allow_none=True)
     first_name = fields.Str(validate=validate.Length(min=1, max=100))
     last_name = fields.Str(validate=validate.Length(min=1, max=100))
-    phone = fields.Str(validate=validate.Length(max=20))
+    phone = fields.Str(validate=validate.Length(min=10, max=25), allow_none=True)
     department = fields.Str(validate=validate.Length(max=100))
+    department_id = fields.Str(allow_none=True)
+    program_id = fields.Str(allow_none=True)
+    student_group_id = fields.Str(allow_none=True)
+
+    @validates("phone")
+    def validate_phone(self, value):
+        if value and "@" in value:
+            raise ValidationError("Phone number cannot contain '@'.")

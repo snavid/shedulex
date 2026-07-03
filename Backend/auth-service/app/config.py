@@ -44,6 +44,8 @@ class Config:
     # Audit service
     AUDIT_SERVICE_URL = os.environ.get("AUDIT_SERVICE_URL", "http://audit-service:5008")
     FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+    INTERNAL_SERVICE_KEY = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
+    TIMETABLE_SERVICE_URL = os.environ.get("TIMETABLE_SERVICE_URL", "http://timetable-engine:5002")
 
 
 class DevelopmentConfig(Config):
@@ -57,6 +59,7 @@ class ProductionConfig(Config):
 class TestingConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+    SQLALCHEMY_ENGINE_OPTIONS = {}
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(seconds=5)
     RATELIMIT_ENABLED = False
     RATELIMIT_STORAGE_URI = "memory://"

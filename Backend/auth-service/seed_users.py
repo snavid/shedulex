@@ -13,6 +13,8 @@ Credentials (change in production!):
   hod:               hod@<code>.shedulex.ac    /  Hod@2026
 """
 import sys, os
+import json
+import urllib.request
 sys.path.insert(0, os.path.dirname(__file__))
 
 from sqlalchemy import text
@@ -48,6 +50,23 @@ ACCOUNTS = [
 ]
 
 
+def _fetch_first_department_id(university_id: str) -> str | None:
+    timetable_url = os.environ.get("TIMETABLE_SERVICE_URL", "http://timetable-engine:5002")
+    internal_key = os.environ.get("INTERNAL_SERVICE_KEY", "dev-internal-service-key")
+    url = f"{timetable_url}/api/v1/departments?university_id={university_id}"
+    req = urllib.request.Request(
+        url,
+        headers={"X-Internal-Service-Key": internal_key},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read().decode())
+            depts = body.get("data") or []
+            return depts[0]["id"] if depts else None
+    except Exception:
+        return None
+
+
 def wipe_users(session):
     print("  Wiping user sessions and users…")
     session.execute(text("DELETE FROM user_sessions"))
@@ -69,8 +88,10 @@ def seed():
         role_map = {r.name: r for r in Role.query.all()}
 
         created = 0
+        phone_counter = 1
         for code, uni_id in UNI_IDS.items():
             code_lower = code.lower()
+            dept_id = _fetch_first_department_id(uni_id)
             print(f"Creating accounts for {UNI_NAMES[code]} ({code})…")
             for role_name, first, last, email_pfx, uname_pfx, pwd in ACCOUNTS:
                 role = role_map.get(role_name)
@@ -80,13 +101,17 @@ def seed():
 
                 email    = f"{email_pfx}@{code_lower}.shedulex.ac"
                 username = f"{uname_pfx}.{code_lower}"
+                phone    = f"+255700000{phone_counter:03d}"
+                phone_counter += 1
 
                 user = User(
                     email=email,
                     username=username,
                     first_name=first,
                     last_name=f"{last} ({code})",
+                    phone=phone,
                     university_id=uni_id,
+                    department_id=dept_id if role_name == "hod" and dept_id else None,
                     role_id=role.id,
                     is_active=True,
                     is_approved=True,

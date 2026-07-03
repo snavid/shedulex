@@ -11,7 +11,24 @@ const api = axios.create({
 export function getErrorMessage(error, fallback = "Request failed.") {
   const payload = error?.response?.data
   if (typeof payload === "string" && payload) return payload
+  if (payload?.errors) {
+    const msgs = Object.values(payload.errors).flat().filter(Boolean)
+    if (msgs.length) return msgs.join(" ")
+  }
   return payload?.message || payload?.error || error?.message || fallback
+}
+
+export function validatePhone(phone) {
+  if (!phone?.trim()) return "Phone number is required."
+  const value = phone.trim()
+  if (value.includes("@")) return "Phone cannot be an email address."
+  if (value.length < 10 || value.length > 25) return "Phone must be 10–25 characters."
+  return null
+}
+
+export function isInvalidStoredPhone(phone) {
+  if (!phone) return false
+  return phone.includes("@") || phone.length > 25 || phone.length < 10
 }
 
 api.interceptors.request.use((config) => {

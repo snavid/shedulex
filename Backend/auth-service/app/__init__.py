@@ -41,9 +41,10 @@ def create_app(config_name: str = None) -> Flask:
         return jsonify({"success": False, "message": "Authorization token required."}), 401
 
     # Blueprints
-    from app.routes import auth_bp, users_bp
+    from app.routes import auth_bp, users_bp, internal_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
+    app.register_blueprint(internal_bp)
 
     # Health check
     @app.get("/health")

@@ -1,12 +1,37 @@
 from datetime import datetime, timezone
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 from app.extensions import db
 from app.models.notification import Notification, NotificationTemplate
-from app.services.sms_service import send_sms, send_bulk_sms
-from app.services.email_service import send_email
+from app.middleware.internal_auth import require_internal_key
+from app.services.dispatch_service import deliver_message, dispatch_notification
+from app.services.timetable_events import append_event
+from app.services.task_queue import enqueue_task, enqueue_task_async
 
 notifications_bp = Blueprint("notifications", __name__, url_prefix="/api/v1/notifications")
+
+
+def _parse_send_payload(body: dict) -> tuple[dict, str | None]:
+    """Normalize send payload and return (fields, validation_error)."""
+    email = body.get("email") or body.get("recipient_email")
+    phone = body.get("phone") or body.get("recipient_phone")
+    channel = body.get("channel", "email")
+    notif_type = body.get("type") or body.get("notification_type", "general")
+
+    if channel in ("sms", "both") and not phone:
+        return {}, "Phone number is required for SMS delivery."
+    if channel in ("email", "both") and not email:
+        return {}, "Email address is required for email delivery."
+
+    return {
+        "recipient_id": body.get("recipient_id"),
+        "recipient_email": email,
+        "recipient_phone": phone,
+        "channel": channel,
+        "subject": body.get("subject", ""),
+        "body": body.get("body", ""),
+        "notification_type": notif_type,
+    }, None
 
 
 @notifications_bp.post("/send")
@@ -17,28 +42,28 @@ def send_notification():
         return jsonify({"success": False, "message": "Forbidden."}), 403
 
     body = request.get_json() or {}
+    fields, error = _parse_send_payload(body)
+    if error:
+        return jsonify({"success": False, "message": error}), 422
+
     notif = Notification(
-        recipient_id=body.get("recipient_id"),
-        recipient_email=body.get("email"),
-        recipient_phone=body.get("phone"),
-        channel=body.get("channel", "email"),
-        subject=body.get("subject", ""),
-        body=body.get("body", ""),
-        notification_type=body.get("type", "general"),
+        **fields,
         scheduled_at=datetime.now(timezone.utc),
     )
     db.session.add(notif)
     db.session.commit()
 
-    # Send immediately
-    sent = False
-    if notif.channel in ("sms", "both") and notif.recipient_phone:
-        sent = send_sms(notif.recipient_phone, notif.body)
-    if notif.channel in ("email", "both") and notif.recipient_email:
-        sent = send_email(notif.recipient_email, notif.subject, notif.body)
+    success, error_message = deliver_message(
+        phone=notif.recipient_phone,
+        email=notif.recipient_email,
+        channel=notif.channel,
+        subject=notif.subject or "",
+        body=notif.body,
+    )
 
-    notif.status = "sent" if sent else "failed"
-    notif.sent_at = datetime.now(timezone.utc) if sent else None
+    notif.status = "sent" if success else "failed"
+    notif.sent_at = datetime.now(timezone.utc) if success else None
+    notif.error_message = error_message
     db.session.commit()
 
     return jsonify({"success": True, "data": notif.to_dict()}), 201
@@ -48,15 +73,41 @@ def send_notification():
 @jwt_required()
 def broadcast():
     claims = get_jwt()
-    if claims.get("role") not in ("admin",):
+    if claims.get("role") not in ("admin", "timetable_officer"):
         return jsonify({"success": False, "message": "Forbidden."}), 403
 
     body = request.get_json() or {}
+    subject = body.get("subject", "Announcement")
+    message = body.get("body", "")
+    if not message:
+        return jsonify({"success": False, "message": "Message body is required."}), 422
+
+    audience = body.get("audience", "all")
+    channel = body.get("channel", "sms")
+    university_id = body.get("university_id") or claims.get("university_id")
+    if not university_id:
+        current_app.logger.warning(
+            "Broadcast attempted without university_id by user %s",
+            get_jwt_identity(),
+        )
+        return jsonify({
+            "success": False,
+            "message": "University scope is required for broadcasts.",
+        }), 422
+    department_id = body.get("department_id")
+    program_id = body.get("program_id")
+
     from app.tasks.reminder_tasks import broadcast_announcement
-    broadcast_announcement.delay(
-        subject=body.get("subject", "Announcement"),
-        body=body.get("body", ""),
-        recipient_ids=body.get("recipient_ids", []),
+    enqueue_task(
+        broadcast_announcement,
+        subject=subject,
+        body=message,
+        audience=audience,
+        channel=channel,
+        university_id=university_id,
+        department_id=department_id,
+        program_id=program_id,
+        recipient_ids=body.get("recipient_ids") or [],
     )
     return jsonify({"success": True, "message": "Broadcast queued."}), 202
 
@@ -67,7 +118,7 @@ def list_notifications():
     user_id = get_jwt_identity()
     claims = get_jwt()
     q = Notification.query
-    if claims.get("role") not in ("admin",):
+    if claims.get("role") not in ("admin", "timetable_officer"):
         q = q.filter_by(recipient_id=user_id)
     notifications = q.order_by(Notification.created_at.desc()).limit(50).all()
     return jsonify({"success": True, "data": [n.to_dict() for n in notifications]}), 200
@@ -96,3 +147,49 @@ def create_template():
     db.session.add(template)
     db.session.commit()
     return jsonify({"success": True, "data": template.to_dict()}), 201
+
+
+@notifications_bp.post("/internal/timetable-event")
+def ingest_timetable_event():
+    denied = require_internal_key()
+    if denied:
+        return denied
+
+    if not current_app.config.get("TIMETABLE_NOTIFY_ENABLED", True):
+        return jsonify({"success": True, "message": "Timetable notifications disabled."}), 202
+
+    body = request.get_json() or {}
+    timetable_id = body.get("timetable_id")
+    if not timetable_id:
+        return jsonify({"success": False, "message": "timetable_id is required."}), 422
+
+    from app.tasks.reminder_tasks import process_timetable_digest
+
+    event_type = body.get("event_type", "update")
+    if event_type == "generated":
+        append_event(timetable_id, body)
+        enqueue_task(process_timetable_digest, timetable_id)
+        return jsonify({"success": True, "message": "Generation notifications queued."}), 202
+
+    started = append_event(timetable_id, body)
+    if started:
+        debounce_seconds = current_app.config.get("TIMETABLE_EVENT_DEBOUNCE_SECONDS", 300)
+        enqueue_task_async(
+            process_timetable_digest,
+            args=[timetable_id],
+            countdown=debounce_seconds,
+        )
+
+    return jsonify({"success": True, "message": "Timetable event buffered."}), 202
+
+
+@notifications_bp.post("/internal/calendar-event")
+def ingest_calendar_event():
+    denied = require_internal_key()
+    if denied:
+        return denied
+
+    body = request.get_json() or {}
+    from app.tasks.reminder_tasks import dispatch_calendar_event
+    enqueue_task(dispatch_calendar_event, body)
+    return jsonify({"success": True, "message": "Calendar event notification queued."}), 202

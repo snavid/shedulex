@@ -178,7 +178,7 @@ async function confirmMove() {
     }).catch(() => {})
 
     await timetableApi.moveEntry(moveModal.entry.id, moveModal.targetSlot.id)
-    toast.success(`Moved ${moveModal.entry.course?.code} → ${moveModal.targetSlot.day} ${moveModal.targetSlot.start_time}`)
+    toast.success(`Moved ${moveModal.entry.course?.code} → ${moveModal.targetSlot.day} ${moveModal.targetSlot.start_time}. HOD, timetable officer, and affected lecturer will be notified within 1 minute.`)
     moveModal.visible = false
     await store.fetchTimetable(route.params.id)
     const tid = store.currentTimetable?.template_id
@@ -327,12 +327,12 @@ async function sendReminder() {
 
     await notificationApi.send({
       recipient_id: entry.lecturer?.user_id,
-      recipient_email: entry.lecturer?.email,
+      email: entry.lecturer?.email,
+      phone: entry.lecturer?.phone || auth.user?.phone,
       channel: reminderForm.value.channel,
-      notification_type: "reminder",
+      type: "reminder",
       subject: `Reminder: ${entry.course?.name}`,
       body: `You have ${entry.course?.name} at ${classTime} in ${entry.room?.name || "TBD"}.`,
-      scheduled_at: reminderForm.value.scheduled_at || undefined,
     })
     toast.success("Reminder scheduled.")
     closeModal()

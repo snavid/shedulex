@@ -1,4 +1,5 @@
 from app import create_app
+from app.celery_app import celery  # noqa: F401 — ensures API uses the Redis broker
 
 app = create_app()
 

@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref, computed } from "vue"
-import { usersApi, getErrorMessage } from "@/api/client"
+import { usersApi, getErrorMessage, validatePhone, isInvalidStoredPhone } from "@/api/client"
 import { useToast } from "vue-toastification"
 
 const toast = useToast()
@@ -9,6 +9,9 @@ const users = ref([])
 const pendingUsers = ref([])
 const roles = ref([])
 const activeTab = ref("all")  // "all" | "pending"
+const showContactModal = ref(false)
+const contactSaving = ref(false)
+const contactForm = ref({ userId: "", name: "", email: "", phone: "", phoneInvalidHint: "" })
 
 const pendingCount = computed(() => pendingUsers.value.length)
 
@@ -82,6 +85,53 @@ function roleBadgeClass(roleName) {
   return map[roleName] || "bg-gray-100 text-gray-600"
 }
 
+function openContactModal(user) {
+  const storedPhone = user.phone || ""
+  const invalidPhone = isInvalidStoredPhone(storedPhone)
+  contactForm.value = {
+    userId: user.id,
+    name: `${user.first_name} ${user.last_name}`,
+    email: user.email || "",
+    phone: invalidPhone ? "" : storedPhone,
+    phoneInvalidHint: invalidPhone ? "Previous phone value was invalid — enter a valid number." : "",
+  }
+  showContactModal.value = true
+}
+
+function closeContactModal() {
+  showContactModal.value = false
+}
+
+async function saveContact() {
+  if (!contactForm.value.email?.trim()) {
+    toast.error("Email is required for notifications.")
+    return
+  }
+  const phoneError = validatePhone(contactForm.value.phone)
+  if (phoneError) {
+    toast.error(phoneError)
+    return
+  }
+  contactSaving.value = true
+  try {
+    await usersApi.update(contactForm.value.userId, {
+      email: contactForm.value.email.trim(),
+      phone: contactForm.value.phone.trim(),
+    })
+    toast.success("Contact details updated.")
+    closeContactModal()
+    await loadData()
+  } catch (e) {
+    toast.error(getErrorMessage(e, "Failed to update contact details."))
+  } finally {
+    contactSaving.value = false
+  }
+}
+
+function phoneLabel(phone) {
+  return phone && !isInvalidStoredPhone(phone) ? phone : null
+}
+
 onMounted(loadData)
 </script>
 
@@ -149,12 +199,20 @@ onMounted(loadData)
             <div class="min-w-0">
               <p class="font-semibold text-gray-900">{{ u.first_name }} {{ u.last_name }}</p>
               <p class="text-xs text-gray-500 truncate">{{ u.email }}</p>
+              <p v-if="phoneLabel(u.phone)" class="text-xs text-gray-400 truncate">{{ phoneLabel(u.phone) }}</p>
+              <span v-else class="inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">No phone</span>
               <span :class="roleBadgeClass(u.role?.name)" class="inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded-full capitalize">
                 {{ (u.role?.name || "").replace(/_/g, " ") }}
               </span>
             </div>
           </div>
           <div class="flex gap-2 flex-shrink-0">
+            <button
+              class="btn-secondary text-sm py-2"
+              @click="openContactModal(u)"
+            >
+              Edit contact
+            </button>
             <button
               class="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors"
               @click="approveUser(u.id, `${u.first_name} ${u.last_name}`)"
@@ -196,15 +254,20 @@ onMounted(loadData)
             <div class="min-w-0">
               <p class="font-medium text-gray-900 truncate">{{ u.first_name }} {{ u.last_name }}</p>
               <p class="text-xs text-gray-500 truncate">{{ u.email }}</p>
+              <p v-if="phoneLabel(u.phone)" class="text-xs text-gray-400 truncate">{{ phoneLabel(u.phone) }}</p>
+              <span v-else class="inline-block mt-0.5 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">No phone</span>
             </div>
           </div>
-          <div class="flex items-center gap-2 flex-shrink-0">
+          <div class="flex items-center gap-2 flex-shrink-0 flex-wrap">
             <span
               :class="u.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'"
               class="text-xs font-semibold px-2 py-0.5 rounded-full"
             >
               {{ u.is_active ? "Active" : "Inactive" }}
             </span>
+            <button class="btn-secondary text-sm py-1.5" @click="openContactModal(u)">
+              Edit contact
+            </button>
             <select
               class="input !w-auto text-sm py-1.5"
               :value="u.role?.name"
@@ -216,6 +279,35 @@ onMounted(loadData)
               {{ u.is_active ? "Deactivate" : "Activate" }}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edit contact modal -->
+    <div
+      v-if="showContactModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      @click.self="closeContactModal"
+    >
+      <div class="card w-full max-w-md space-y-4">
+        <div>
+          <h2 class="text-lg font-semibold text-gray-900">Edit contact</h2>
+          <p class="text-sm text-gray-500 mt-1">{{ contactForm.name }}</p>
+        </div>
+        <div>
+          <label class="label">Email *</label>
+          <input v-model="contactForm.email" type="email" required class="input" placeholder="user@university.ac" />
+        </div>
+        <div>
+          <label class="label">Phone *</label>
+          <input v-model="contactForm.phone" required class="input" placeholder="+255700000000" />
+          <p v-if="contactForm.phoneInvalidHint" class="text-xs text-amber-600 mt-1">{{ contactForm.phoneInvalidHint }}</p>
+        </div>
+        <div class="flex justify-end gap-2">
+          <button class="btn-secondary" :disabled="contactSaving" @click="closeContactModal">Cancel</button>
+          <button class="btn-primary" :disabled="contactSaving" @click="saveContact">
+            {{ contactSaving ? "Saving..." : "Save" }}
+          </button>
         </div>
       </div>
     </div>

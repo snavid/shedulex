@@ -77,13 +77,31 @@ def update_user(user_id):
     if not user:
         return jsonify({"success": False, "message": "User not found."}), 404
 
+    if requester_id != user_id:
+        uni_id = claims.get("university_id")
+        if uni_id and user.university_id != uni_id:
+            return jsonify({"success": False, "message": "Forbidden."}), 403
+
     try:
         data = update_schema.load(request.get_json())
     except ValidationError as e:
         return jsonify({"success": False, "message": "Validation failed", "errors": e.messages}), 422
 
+    data = {k: v for k, v in data.items() if v is not None}
+
+    if "email" in data:
+        data["email"] = data["email"].lower()
+        if data["email"] != user.email:
+            existing = User.query.filter_by(email=data["email"]).first()
+            if existing:
+                return jsonify({"success": False, "message": "A user with this email already exists."}), 409
+
     for key, value in data.items():
         setattr(user, key, value)
+    if data.get("department_id") and not data.get("department"):
+        dept_name = auth_service._resolve_department_name(data["department_id"])
+        if dept_name:
+            user.department = dept_name
     db.session.commit()
     return jsonify({"success": True, "data": user.to_dict()}), 200
 
@@ -183,7 +201,7 @@ def list_roles():
 @roles_required("admin", "timetable_officer", "hod")
 def create_lecturer():
     body = request.get_json() or {}
-    required = ["email", "first_name", "last_name"]
+    required = ["email", "first_name", "last_name", "phone"]
     missing = [f for f in required if not body.get(f)]
     if missing:
         return jsonify({"success": False, "message": f"Missing fields: {', '.join(missing)}"}), 422

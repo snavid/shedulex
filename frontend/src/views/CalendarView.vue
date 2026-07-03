@@ -687,12 +687,12 @@ async function sendReminder() {
     const evt = selectedEvent.value
     await notificationApi.send({
       recipient_id: auth.user?.id,
-      recipient_email: auth.user?.email,
+      email: auth.user?.email,
+      phone: auth.user?.phone,
       channel: reminderForm.channel,
-      notification_type: "reminder",
+      type: "reminder",
       subject: `Reminder: ${evt.title}`,
       body: `You have an upcoming event: "${evt.title}" on ${formatDate(evt.start)}${evt.location ? " at " + evt.location : ""}.`,
-      scheduled_at: reminderForm.scheduled_at || undefined,
     })
     toast.success("Reminder set.")
     showReminderForm.value = false

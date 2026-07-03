@@ -310,6 +310,7 @@ class Lecturer(db.Model):
         return {
             "id": self.id, "name": self.name, "email": self.email,
             "phone": self.phone,
+            "user_id": self.user_id,
             "staff_id": self.staff_id, "specialization": self.specialization,
             "max_hours_per_week": self.max_hours_per_week,
             "max_hours_per_day": self.max_hours_per_day,

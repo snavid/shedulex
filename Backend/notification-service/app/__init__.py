@@ -24,5 +24,7 @@ def create_app(config_name: str = None) -> Flask:
 
     with app.app_context():
         db.create_all()
+        from app.services.template_seed import seed_notification_templates
+        seed_notification_templates()
 
     return app

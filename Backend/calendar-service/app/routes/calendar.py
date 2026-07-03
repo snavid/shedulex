@@ -82,7 +82,10 @@ def create_event():
     )
     db.session.add(evt)
     db.session.commit()
-    return jsonify({"success": True, "data": evt.to_dict()}), 201
+    event_data = evt.to_dict()
+    from app.services.notification_client import maybe_notify_same_day_event
+    maybe_notify_same_day_event(event_data)
+    return jsonify({"success": True, "data": event_data}), 201
 
 
 @calendar_bp.put("/events/<event_id>")

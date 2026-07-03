@@ -622,15 +622,38 @@ def substitute_lecturer(timetable_id):
 
     entries = (
         TimetableEntry.query
+        .options(
+            joinedload(TimetableEntry.course),
+            joinedload(TimetableEntry.time_slot),
+            joinedload(TimetableEntry.room),
+        )
         .filter_by(timetable_id=timetable_id, lecturer_id=sick_id)
         .all()
     )
     if not entries:
         return ok(message="No entries found for the sick lecturer in this timetable.", data={"updated": 0})
 
+    from app.models.domain import Timetable
+    from app.services.notification_client import emit_timetable_event
+    from app.services.timetable_events import base_event, change_from_entry
+
+    changes = [
+        change_from_entry(
+            entry,
+            old_lecturer_id=sick_id,
+            new_lecturer_id=replacement_id,
+        )
+        for entry in entries
+    ]
+
     for entry in entries:
         entry.lecturer_id = replacement_id
     db.session.commit()
+
+    timetable = Timetable.query.get(timetable_id)
+    if timetable:
+        emit_timetable_event(base_event(timetable, "lecturer_substituted", changes=changes))
+
     return ok(data={"updated": len(entries), "replacement": replacement.to_dict()})
 
 

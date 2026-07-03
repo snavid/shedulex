@@ -13,7 +13,9 @@ def create_app(config_name=None):
     jwt.init_app(app)
     cors.init_app(app, resources={r"/api/*": {"origins": "*"}})
     from app.routes import calendar_bp
+    from app.routes.internal import internal_bp
     app.register_blueprint(calendar_bp)
+    app.register_blueprint(internal_bp)
 
     @app.get("/health")
     def health():
