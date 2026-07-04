@@ -155,7 +155,7 @@ const navItems = computed(() => {
   const base = [
     { to: "/dashboard",              label: "Dashboard",      icon: "dashboard" },
     { to: "/timetable",              label: "Timetables",     icon: "timetable" },
-    { to: "/ai-assistant",           label: "AI Assistant",   icon: "ai" },
+   // { to: "/ai-assistant",           label: "AI Assistant",   icon: "ai" },
     { to: "/calendar",               label: "Calendar",       icon: "calendar" },
     { to: "/analytics",              label: "Analytics",      icon: "analytics" },
     { to: "/notifications",          label: "Notifications",  icon: "notifications" },

@@ -9,6 +9,14 @@ import {
   setPortalToken,
   validatePhone,
 } from "@/api/client"
+import ReminderSheet from "@/components/ReminderSheet.vue"
+import {
+  buildSessionReminderPayload,
+  formatReminderTime,
+  leadLabel,
+  pendingCountForEntry,
+  remindersForEntry,
+} from "@/utils/sessionReminders"
 
 const route = useRoute()
 const toast = useToast()
@@ -33,6 +41,13 @@ const comments = ref([])
 const commentForm = ref({ entry_id: "", body: "" })
 const postingComment = ref(false)
 
+const pendingReminders = ref([])
+const loadingReminders = ref(false)
+const showReminderSheet = ref(false)
+const selectedReminderEntry = ref(null)
+const savingReminder = ref(false)
+const cancellingReminderId = ref(null)
+
 const tabs = [
   {
     id: "timetable",
@@ -42,8 +57,8 @@ const tabs = [
   },
   {
     id: "notifications",
-    label: "Alerts",
-    desc: "SMS & email settings",
+    label: "Reminders",
+    desc: "Class alerts & contact",
     icon: "M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9",
   },
   {
@@ -122,6 +137,107 @@ const nextSessionToday = computed(() => {
   return todaySessions.value.find((e) => (e.time_slot?.start_time || "") >= nowStr) || null
 })
 
+const semesterEndDate = computed(() => selectedSemesterMeta.value?.end_date || null)
+
+const portalContact = computed(() => ({
+  phone: portalUser.value?.phone || subscribeForm.value.phone || "",
+  email: portalUser.value?.email || subscribeForm.value.email || "",
+}))
+
+const sheetExistingReminders = computed(() => {
+  if (!selectedReminderEntry.value) return []
+  return remindersForEntry(pendingReminders.value, selectedReminderEntry.value.id)
+})
+
+const sortedPendingReminders = computed(() =>
+  [...pendingReminders.value]
+    .filter(r => r.status === "pending")
+    .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))
+)
+
+function reminderCount(entryId) {
+  return pendingCountForEntry(pendingReminders.value, entryId)
+}
+
+function reminderApiError(e, fallback) {
+  if (e?.response?.status === 404) {
+    return "Reminder service not available. Backend may need a restart."
+  }
+  return getErrorMessage(e, fallback)
+}
+
+async function loadPendingReminders() {
+  if (!getPortalToken()) return
+  loadingReminders.value = true
+  try {
+    const { data } = await portalApi.reminders.list({ status: "pending" })
+    pendingReminders.value = data.data || []
+  } catch (e) {
+    pendingReminders.value = []
+    if (e?.response?.status === 404) {
+      toast.warning("Reminder service not available. Backend may need a restart.")
+    }
+  } finally {
+    loadingReminders.value = false
+  }
+}
+
+function openReminderSheet(entry) {
+  selectedReminderEntry.value = entry
+  showReminderSheet.value = true
+}
+
+async function handleReminderSave({ channel, leadTimes, phone, occurrence, repeatWeeklyUntil }) {
+  if (!selectedReminderEntry.value || !occurrence) return
+
+  savingReminder.value = true
+  try {
+    if (phone && !portalUser.value?.phone?.trim()) {
+      const phoneError = validatePhone(phone)
+      if (phoneError) {
+        toast.error(phoneError)
+        return
+      }
+      const { data } = await portalApi.subscribe({ phone })
+      portalUser.value = { ...portalUser.value, ...data.data }
+      subscribeForm.value.phone = data.data.phone || phone
+    }
+
+    const payload = buildSessionReminderPayload(selectedReminderEntry.value, {
+      channel,
+      leadTimes,
+      occurrenceDate: occurrence,
+      repeatWeeklyUntil,
+    })
+    const { data } = await portalApi.reminders.create(payload)
+    toast.success(data.message || "Reminder(s) scheduled.")
+    showReminderSheet.value = false
+    await loadPendingReminders()
+  } catch (e) {
+    toast.error(reminderApiError(e, "Failed to set reminder."))
+  } finally {
+    savingReminder.value = false
+  }
+}
+
+async function cancelReminder(reminderId) {
+  cancellingReminderId.value = reminderId
+  try {
+    await portalApi.reminders.cancel(reminderId)
+    pendingReminders.value = pendingReminders.value.filter(r => r.id !== reminderId)
+    toast.success("Reminder cancelled.")
+  } catch (e) {
+    toast.error(reminderApiError(e, "Failed to cancel reminder."))
+  } finally {
+    cancellingReminderId.value = null
+  }
+}
+
+function goToAlertsTab() {
+  showReminderSheet.value = false
+  activeTab.value = "notifications"
+}
+
 async function login() {
   if (!loginForm.value.registration_number?.trim() || loginForm.value.phone_last4?.length !== 4) {
     toast.error("Enter your registration number and the last 4 digits of your phone.")
@@ -158,6 +274,7 @@ function logout() {
   selectedSemester.value = null
   selectedTimetableId.value = null
   comments.value = []
+  pendingReminders.value = []
 }
 
 async function loadTimetableForSelection(timetableId) {
@@ -195,16 +312,34 @@ async function loadAllCommentSessions() {
   commentSessionEntries.value = results.flatMap((res) => res.data.data || [])
 }
 
+async function portalApiWithRetry(fn, retries = 1) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn()
+    } catch (e) {
+      const status = e?.response?.status
+      const retryable = [502, 503, 504].includes(status)
+      if (!retryable || attempt >= retries) throw e
+      await new Promise(r => setTimeout(r, 1500))
+    }
+  }
+}
+
+async function loadCommentsOptional() {
+  try {
+    const { data } = await portalApiWithRetry(() => portalApi.comments())
+    comments.value = data.data || []
+  } catch {
+    comments.value = []
+  }
+}
+
 async function loadPortalData() {
   if (!getPortalToken()) return
   loading.value = true
   try {
-    const [semRes, commentsRes] = await Promise.all([
-      portalApi.timetableSemesters(),
-      portalApi.comments(),
-    ])
+    const semRes = await portalApiWithRetry(() => portalApi.timetableSemesters())
     availableSemesters.value = semRes.data.data || []
-    comments.value = commentsRes.data.data || []
 
     if (availableSemesters.value.length) {
       const current = selectedTimetableId.value
@@ -212,19 +347,25 @@ async function loadPortalData() {
       selectedTimetableId.value = stillValid
         ? current
         : availableSemesters.value[0].timetable_id
-      await Promise.all([
-        loadTimetableForSelection(selectedTimetableId.value),
-        loadAllCommentSessions(),
-      ])
+      await loadTimetableForSelection(selectedTimetableId.value)
+      loadAllCommentSessions().catch(() => { commentSessionEntries.value = [] })
+      loadPendingReminders()
+      loadCommentsOptional()
     } else {
       timetableEntries.value = []
       commentSessionEntries.value = []
       selectedSemester.value = null
       selectedTimetableId.value = null
+      loadCommentsOptional()
+      loadPendingReminders()
     }
   } catch (e) {
     if (e?.response?.status === 401) logout()
-    else toast.error(getErrorMessage(e, "Failed to load portal data."))
+    else if ([502, 503, 504].includes(e?.response?.status)) {
+      toast.error("Timetable service is restarting. Wait a moment and refresh.")
+    } else {
+      toast.error(getErrorMessage(e, "Failed to load portal data."))
+    }
   } finally {
     loading.value = false
   }
@@ -299,7 +440,7 @@ function dayTheme(day) {
 }
 
 watch(activeTab, (tab) => {
-  if (authenticated.value && tab !== "gate") loadPortalData()
+  if (authenticated.value && tab === "notifications") loadPendingReminders()
 })
 
 onMounted(() => {
@@ -451,14 +592,25 @@ onMounted(() => {
             </div>
 
             <div v-if="activeTab === 'timetable' && nextSessionToday" class="rounded-xl border border-blue-200 bg-white/80 px-4 py-3 shadow-sm">
-              <p class="text-[11px] font-semibold uppercase tracking-wider text-blue-600">Up next today</p>
-              <p class="mt-0.5 font-semibold text-slate-900">
-                {{ nextSessionToday.course?.name || nextSessionToday.course?.code }}
-              </p>
-              <p class="text-xs text-slate-500">
-                {{ nextSessionToday.time_slot?.start_time }} – {{ nextSessionToday.time_slot?.end_time }}
-                · {{ nextSessionToday.room?.name || "TBA" }}
-              </p>
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-[11px] font-semibold uppercase tracking-wider text-blue-600">Up next today</p>
+                  <p class="mt-0.5 font-semibold text-slate-900">
+                    {{ nextSessionToday.course?.name || nextSessionToday.course?.code }}
+                  </p>
+                  <p class="text-xs text-slate-500">
+                    {{ nextSessionToday.time_slot?.start_time }} – {{ nextSessionToday.time_slot?.end_time }}
+                    · {{ nextSessionToday.room?.name || "TBA" }}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="shrink-0 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700"
+                  @click="openReminderSheet(nextSessionToday)"
+                >
+                  Remind me
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -656,6 +808,19 @@ onMounted(() => {
                         {{ entry.course.code }}
                       </p>
                     </div>
+                    <button
+                      type="button"
+                      class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition"
+                      :class="reminderCount(entry.id)
+                        ? 'border-blue-300 bg-blue-50 text-blue-600'
+                        : 'border-slate-200 bg-white text-slate-400 hover:border-blue-200 hover:text-blue-600'"
+                      :title="reminderCount(entry.id) ? 'Reminders set' : 'Set reminder'"
+                      @click="openReminderSheet(entry)"
+                    >
+                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                      </svg>
+                    </button>
                   </div>
 
                   <div class="mt-3 flex flex-wrap gap-2">
@@ -679,17 +844,17 @@ onMounted(() => {
           </template>
         </div>
 
-        <!-- Notifications -->
-        <div v-else-if="activeTab === 'notifications'" class="mx-auto max-w-xl">
+        <!-- Reminders & Alerts -->
+        <div v-else-if="activeTab === 'notifications'" class="mx-auto max-w-xl space-y-5">
           <div class="card">
             <div class="mb-6 flex items-start gap-4">
               <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-2xl">
                 🔔
               </div>
               <div>
-                <h2 class="text-lg font-bold text-slate-900">Notification preferences</h2>
+                <h2 class="text-lg font-bold text-slate-900">Reminders &amp; Alerts</h2>
                 <p class="mt-1 text-sm text-slate-500">
-                  Receive class announcements and timetable updates via SMS or email.
+                  Set class reminders and keep your SMS/email contact up to date.
                 </p>
               </div>
             </div>
@@ -737,6 +902,50 @@ onMounted(() => {
               <button class="btn-primary" :disabled="savingSubscribe" @click="saveSubscribe">
                 {{ savingSubscribe ? "Saving…" : "Save preferences" }}
               </button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h3 class="font-bold text-slate-900">Your upcoming reminders</h3>
+                <p class="text-sm text-slate-500">Scheduled alerts before your classes.</p>
+              </div>
+              <span v-if="sortedPendingReminders.length" class="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                {{ sortedPendingReminders.length }}
+              </span>
+            </div>
+
+            <div v-if="loadingReminders" class="py-8 text-center text-sm text-slate-500">Loading reminders…</div>
+
+            <div v-else-if="sortedPendingReminders.length" class="space-y-2">
+              <div
+                v-for="rem in sortedPendingReminders"
+                :key="rem.id"
+                class="flex items-start justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3"
+              >
+                <div class="min-w-0">
+                  <p class="truncate font-semibold text-slate-900">{{ rem.event_title }}</p>
+                  <p class="mt-0.5 text-xs text-slate-500">
+                    {{ leadLabel(rem.lead_minutes) }} · {{ rem.channel?.toUpperCase() }}
+                  </p>
+                  <p class="mt-1 text-xs text-slate-400">{{ formatReminderTime(rem.scheduled_at) }}</p>
+                </div>
+                <button
+                  type="button"
+                  class="shrink-0 text-xs font-semibold text-red-600 hover:underline"
+                  :disabled="cancellingReminderId === rem.id"
+                  @click="cancelReminder(rem.id)"
+                >
+                  {{ cancellingReminderId === rem.id ? "…" : "Cancel" }}
+                </button>
+              </div>
+            </div>
+
+            <div v-else class="py-10 text-center">
+              <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-2xl">⏰</div>
+              <p class="font-medium text-slate-700">No reminders yet</p>
+              <p class="mt-1 text-sm text-slate-500">Tap the bell on any class in your timetable to get reminded.</p>
             </div>
           </div>
         </div>
@@ -861,6 +1070,19 @@ onMounted(() => {
         </button>
       </div>
     </nav>
+
+    <ReminderSheet
+      :open="showReminderSheet"
+      :entry="selectedReminderEntry"
+      :contact="portalContact"
+      :semester-end="semesterEndDate"
+      :existing-reminders="sheetExistingReminders"
+      :saving="savingReminder"
+      @close="showReminderSheet = false"
+      @save="handleReminderSave"
+      @cancel-reminder="cancelReminder"
+      @go-to-alerts="goToAlertsTab"
+    />
   </div>
 </template>
 

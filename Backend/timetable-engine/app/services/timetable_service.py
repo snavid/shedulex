@@ -323,6 +323,23 @@ def get_timetable_by_id(timetable_id: str) -> Timetable | None:
     )
 
 
+def update_timetable_metadata(timetable_id: str, **fields) -> Timetable:
+    """Update mutable timetable metadata (e.g. calendar_semester_id)."""
+    allowed = {"calendar_semester_id", "name"}
+    tt = Timetable.query.get(timetable_id)
+    if not tt:
+        raise ValueError("Timetable not found.")
+    changed = False
+    for key, value in fields.items():
+        if key in allowed and value is not None:
+            setattr(tt, key, value)
+            changed = True
+    if not changed:
+        raise ValueError("No updatable fields provided.")
+    db.session.commit()
+    return tt
+
+
 def list_timetables(
     department_id: str = None,
     semester: int = None,

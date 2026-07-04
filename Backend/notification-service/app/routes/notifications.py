@@ -3,10 +3,12 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 from app.extensions import db
 from app.models.notification import Notification, NotificationTemplate
+from app.models.event_reminder import EventReminder
 from app.middleware.internal_auth import require_internal_key
 from app.services.dispatch_service import deliver_message, dispatch_notification
 from app.services.timetable_events import append_event
 from app.services.task_queue import enqueue_task, enqueue_task_async
+from app.services.reminder_service import create_reminders, list_reminders, cancel_reminder
 
 notifications_bp = Blueprint("notifications", __name__, url_prefix="/api/v1/notifications")
 
@@ -246,3 +248,67 @@ def ingest_calendar_event():
     from app.tasks.reminder_tasks import dispatch_calendar_event
     enqueue_task(dispatch_calendar_event, body)
     return jsonify({"success": True, "message": "Calendar event notification queued."}), 202
+
+
+def _check_portal_reminder_access(claims: dict, body: dict | None = None):
+    """Portal students may manage session reminders only."""
+    if not claims.get("portal"):
+        return None
+    if claims.get("role") != "student":
+        return jsonify({"success": False, "message": "Portal access denied."}), 403
+    if body is not None and body.get("event_source") != "session":
+        return jsonify({"success": False, "message": "Portal students can only set class session reminders."}), 403
+    return None
+
+
+@notifications_bp.post("/reminders")
+@jwt_required()
+def create_event_reminders():
+    claims = get_jwt()
+    body = request.get_json() or {}
+    denied = _check_portal_reminder_access(claims, body)
+    if denied:
+        return denied
+
+    user_id = get_jwt_identity()
+    reminders, error = create_reminders(user_id, body)
+    if error:
+        return jsonify({"success": False, "message": error}), 422
+
+    return jsonify({
+        "success": True,
+        "data": [r.to_dict() for r in reminders],
+        "message": f"{len(reminders)} reminder(s) scheduled.",
+    }), 201
+
+
+@notifications_bp.get("/reminders")
+@jwt_required()
+def get_event_reminders():
+    claims = get_jwt()
+    denied = _check_portal_reminder_access(claims)
+    if denied:
+        return denied
+
+    user_id = get_jwt_identity()
+    event_key = request.args.get("event_key")
+    status = request.args.get("status")
+    reminders = list_reminders(user_id, event_key=event_key, status=status)
+    return jsonify({"success": True, "data": [r.to_dict() for r in reminders]}), 200
+
+
+@notifications_bp.delete("/reminders/<reminder_id>")
+@jwt_required()
+def delete_event_reminder(reminder_id):
+    claims = get_jwt()
+    denied = _check_portal_reminder_access(claims)
+    if denied:
+        return denied
+
+    user_id = get_jwt_identity()
+    reminder, error = cancel_reminder(user_id, reminder_id)
+    if error:
+        status = 404 if "not found" in error.lower() else 422
+        return jsonify({"success": False, "message": error}), status
+
+    return jsonify({"success": True, "data": reminder.to_dict(), "message": "Reminder cancelled."}), 200

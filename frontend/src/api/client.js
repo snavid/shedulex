@@ -102,6 +102,7 @@ export const timetableApi = {
   substituteLecturer: (timetableId, data) =>
     api.post(`/timetable/${timetableId}/substitute-lecturer`, data),
   archive: (timetableId) => api.patch(`/timetable/${timetableId}/archive`),
+  update: (timetableId, data) => api.patch(`/timetable/${timetableId}`, data),
   delete: (timetableId) => api.delete(`/timetable/${timetableId}`),
   listVersions: (timetableId) => api.get(`/timetable/${timetableId}/versions`),
   createVersion: (timetableId, data) => api.post(`/timetable/${timetableId}/versions`, data),
@@ -200,6 +201,11 @@ export const notificationApi = {
   templates: () => api.get("/notifications/templates"),
   broadcast: (data) => api.post("/notifications/broadcast", data),
   classAnnounce: (data) => api.post("/notifications/class-announcement", data),
+  reminders: {
+    create: (data) => api.post("/notifications/reminders", data),
+    list: (params) => api.get("/notifications/reminders", { params }),
+    cancel: (id) => api.delete(`/notifications/reminders/${id}`),
+  },
 }
 
 export const calendarApi = {
@@ -294,6 +300,11 @@ export const portalApi = {
   timetable: (params) => portalClient.get("/portal/timetable", { params }),
   comments: () => portalClient.get("/portal/comments"),
   createComment: (data) => portalClient.post("/portal/comments", data),
+  reminders: {
+    create: (data) => portalClient.post("/notifications/reminders", data),
+    list: (params) => portalClient.get("/notifications/reminders", { params }),
+    cancel: (id) => portalClient.delete(`/notifications/reminders/${id}`),
+  },
 }
 
 export const adminCommentsApi = {

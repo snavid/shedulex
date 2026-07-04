@@ -2,7 +2,13 @@ _format_version: "3.0"
 _transform: true
 
 # Upstreams use Docker DNS hostnames so Kong re-resolves after container recreate.
+# KONG_DNS_STALE_TTL=1 (docker-compose) refreshes stale IPs quickly.
 # After rebuilding a backend service, run: docker compose restart kong
+# or: bash scripts/restart-backend.sh <service-names>
+#
+# No active healthchecks: each upstream has a single target, so one failed probe
+# marks the only peer unhealthy and Kong returns 503 "failed to get a peer from
+# the ring-balancer" even while the service is up.
 upstreams:
   - name: auth-upstream
     targets:
@@ -37,7 +43,7 @@ upstreams:
       - target: audit-service:5008
         weight: 100
 
-# ─── Services ─────────────────────────────────────────────────────────────────
+# --- Services ---
 services:
 
   - name: auth-service
@@ -73,7 +79,7 @@ services:
           minute: 20
           policy: local
 
-  # auth-portal-subscribe uses JWT — attach plugin on a dedicated service
+  # auth-portal-subscribe uses JWT attach plugin on a dedicated service
   - name: auth-portal-protected
     protocol: http
     host: auth-upstream
@@ -92,7 +98,7 @@ services:
           minute: 60
           policy: local
 
-  # Public timetable routes (no JWT) — used during registration before user has a token
+  # Public timetable routes (no JWT) ? used during registration before user has a token
   - name: timetable-public
     protocol: http
     host: timetable-upstream
@@ -278,7 +284,7 @@ services:
         config:
           secret_is_base64: false
 
-# ─── Global plugins ───────────────────────────────────────────────────────────
+# --- Global plugins ---
 # Note: Kong 3.5+ adds X-Kong-Request-Id without the legacy request-id plugin
 # (that plugin is not in the default enabled set and breaks DB-less startup).
 plugins:

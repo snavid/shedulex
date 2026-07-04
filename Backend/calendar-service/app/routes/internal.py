@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, current_app, jsonify, request
 
 from app.extensions import db
-from app.models.event import AcademicEvent
+from app.models.event import AcademicEvent, AcademicSemester
 
 internal_bp = Blueprint("internal", __name__, url_prefix="/api/v1/calendar/internal")
 LOCAL_TZ = ZoneInfo("Africa/Dar_es_Salaam")
@@ -40,3 +40,15 @@ def events_today():
 
     events = q.order_by(AcademicEvent.start_datetime.asc()).all()
     return jsonify({"success": True, "data": [e.to_dict() for e in events]}), 200
+
+
+@internal_bp.get("/semesters/<sem_id>")
+def get_semester(sem_id):
+    denied = _require_internal_key()
+    if denied:
+        return denied
+
+    sem = AcademicSemester.query.get(sem_id)
+    if not sem:
+        return jsonify({"success": False, "message": "Semester not found."}), 404
+    return jsonify({"success": True, "data": sem.to_dict()}), 200

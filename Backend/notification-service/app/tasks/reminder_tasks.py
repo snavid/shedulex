@@ -31,10 +31,17 @@ def _dispatch_notification_record(notif) -> bool:
 def send_lecture_reminder(self, notification_id: str):
     from app.extensions import db
     from app.models.notification import Notification
+    from app.models.event_reminder import EventReminder
 
     with current_app.app_context():
         notif = Notification.query.get(notification_id)
         if not notif or notif.status != "pending":
+            return
+
+        linked = EventReminder.query.filter_by(notification_id=notification_id).first()
+        if linked and linked.status == "cancelled":
+            notif.status = "cancelled"
+            db.session.commit()
             return
 
         try:
@@ -43,12 +50,39 @@ def send_lecture_reminder(self, notification_id: str):
             notif.sent_at = datetime.now(timezone.utc) if sent else None
             if not sent and not notif.error_message:
                 notif.error_message = "Delivery failed"
+            if linked:
+                linked.status = "sent" if sent else "failed"
             db.session.commit()
         except Exception as exc:
             notif.status = "failed"
             notif.error_message = str(exc)
+            if linked:
+                linked.status = "failed"
             db.session.commit()
             raise self.retry(exc=exc, countdown=60)
+
+
+@celery.task(name="tasks.process_due_reminders")
+def process_due_reminders():
+    """Fallback: deliver pending event reminders whose scheduled_at has passed."""
+    from app.extensions import db
+    from app.models.event_reminder import EventReminder
+
+    now = datetime.now(timezone.utc)
+    with current_app.app_context():
+        due = (
+            EventReminder.query
+            .filter(
+                EventReminder.status == "pending",
+                EventReminder.scheduled_at <= now,
+            )
+            .limit(100)
+            .all()
+        )
+        for reminder in due:
+            if reminder.notification_id:
+                send_lecture_reminder.delay(reminder.notification_id)
+        db.session.commit()
 
 
 @celery.task(name="tasks.schedule_daily_reminders")

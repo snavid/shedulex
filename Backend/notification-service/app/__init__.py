@@ -23,6 +23,7 @@ def create_app(config_name: str = None) -> Flask:
         return jsonify({"status": "ok", "service": "notification-service"}), 200
 
     with app.app_context():
+        from app import models  # noqa: F401 — register all models before create_all
         db.create_all()
         from app.services.template_seed import seed_notification_templates
         seed_notification_templates()

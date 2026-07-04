@@ -470,6 +470,8 @@ class Timetable(db.Model):
             "generation_time_seconds": self.generation_time_seconds,
             "generations_run": self.generations_run,
             "template_id": self.template_id,
+            "department_id": self.department_id,
+            "program_id": self.program_id,
             "template": self.template.to_dict() if self.template else None,
             "academic_year_id": self.academic_year_id,
             "academic_year_obj": self.year.to_dict() if self.year else None,

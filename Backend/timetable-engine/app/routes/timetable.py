@@ -224,6 +224,30 @@ def toggle_lock(timetable_id, entry_id):
     return ok(data=entry.to_dict())
 
 
+@timetable_bp.patch("/<timetable_id>")
+@service_or_jwt_required("admin", "timetable_officer")
+def update_timetable(timetable_id):
+    body = json_body()
+    tt = timetable_service.get_timetable_by_id(timetable_id)
+    if not tt:
+        return fail("Timetable not found.", status=404)
+    err = _check_timetable_access(tt)
+    if err:
+        return err
+    if "calendar_semester_id" not in body and "name" not in body:
+        return fail("No updatable fields provided.", status=422)
+    updates = {}
+    if "calendar_semester_id" in body:
+        updates["calendar_semester_id"] = body["calendar_semester_id"]
+    if "name" in body:
+        updates["name"] = body["name"]
+    try:
+        updated = timetable_service.update_timetable_metadata(timetable_id, **updates)
+    except ValueError as ex:
+        return fail(str(ex), status=404)
+    return ok(data=updated.to_dict(), message="Timetable updated.")
+
+
 @timetable_bp.patch("/<timetable_id>/archive")
 @service_or_jwt_required("admin", "timetable_officer")
 def archive_timetable(timetable_id):

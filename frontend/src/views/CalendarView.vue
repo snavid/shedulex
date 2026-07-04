@@ -6,7 +6,7 @@ import timeGridPlugin from "@fullcalendar/timegrid"
 import interactionPlugin from "@fullcalendar/interaction"
 import multiMonthPlugin from "@fullcalendar/multimonth"
 import listPlugin from "@fullcalendar/list"
-import { calendarApi, timetableApi, notificationApi, getErrorMessage } from "@/api/client"
+import { calendarApi, timetableApi, notificationApi, usersApi, resourcesApi, getErrorMessage, validatePhone } from "@/api/client"
 import { useToast } from "vue-toastification"
 import { useAuthStore } from "@/stores/auth"
 
@@ -23,6 +23,10 @@ const timetableEntriesMap = ref({})
 // which timetables are checked on in the sidebar
 const enabledTimetables = ref(new Set())
 const semesters = ref([])
+const departments = ref([])
+const programs = ref([])
+const filterDepartmentId = ref("")
+const filterProgramId = ref("")
 const loading = ref(true)
 const holidaysLoading = ref(false)
 const institutionalHolidays = ref([])
@@ -138,10 +142,92 @@ const createForm = reactive({
   affects_timetable: false, timetable_scope: "",
 })
 
-const reminderForm = reactive({ channel: "email", scheduled_at: "" })
+const reminderForm = reactive({ channel: "sms", leadTimes: [60], phone: "" })
+const existingReminders = ref([])
+const loadingReminders = ref(false)
+const cancellingReminderId = ref(null)
 const cancelReason = ref("")
 
+const LEAD_OPTIONS = [
+  { minutes: 1440, label: "1 day before" },
+  { minutes: 60, label: "1 hour before" },
+  { minutes: 15, label: "15 minutes before" },
+  { minutes: 0, label: "At event time" },
+]
+
+const REMINDER_CHANNELS = [
+  { value: "sms", label: "SMS" },
+  { value: "email", label: "Email" },
+  { value: "both", label: "Both" },
+]
+
+const SEMESTER_COLORS = {
+  1: { bg: "#1D4ED8", border: "#1E40AF" },
+  2: { bg: "#4338CA", border: "#3730A3" },
+  default: { bg: "#1D4ED8", border: "#1E40AF" },
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
+function normalizeYear(yr) {
+  return (yr || "").replace(/\s/g, "").replace(/[\/\-]/g, "").toLowerCase()
+}
+
+function timetableDeptId(tt) {
+  return tt?.department_id || tt?.department?.id || null
+}
+
+function timetableProgramId(tt) {
+  return tt?.program_id || tt?.program?.id || null
+}
+
+function entryMatchesProgram(entry, programId) {
+  if (!programId) return true
+  const courseProg = entry.course?.program_id || entry.course?.program?.id
+  const groupProg = entry.student_group?.program_id || entry.student_group?.program?.id
+  return courseProg === programId || groupProg === programId
+}
+
+function timetableHasProgramSessions(tt, programId) {
+  if (!programId) return true
+  if (timetableProgramId(tt) === programId) return true
+  const entries = timetableEntriesMap.value[tt.id] || []
+  return entries.some(e => entryMatchesProgram(e, programId))
+}
+
+/** Resolve which calendar semester a timetable belongs to (never falls back to current). */
+function resolveSemesterForTimetable(tt) {
+  if (!tt || !semesters.value.length) return null
+
+  if (tt.calendar_semester_id) {
+    const byId = semesters.value.find(s => s.id === tt.calendar_semester_id)
+    if (byId) return byId
+  }
+
+  const ttYear = normalizeYear(tt.academic_year)
+  const byNumAndYear = semesters.value.filter(s =>
+    s.semester_number === tt.semester &&
+    normalizeYear(s.academic_year) === ttYear
+  )
+  if (byNumAndYear.length === 1) return byNumAndYear[0]
+
+  const byNum = semesters.value.filter(s => s.semester_number === tt.semester)
+  if (byNum.length === 1) return byNum[0]
+
+  return null
+}
+
+function semesterColor(sem) {
+  if (!sem) return SEMESTER_COLORS.default
+  return SEMESTER_COLORS[sem.semester_number] || SEMESTER_COLORS.default
+}
+
+function formatShortDateRange(start, end) {
+  if (!start || !end) return ""
+  const fmt = (d) => new Date(d + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })
+  return `${fmt(start)} – ${fmt(end)}`
+}
+
+// ── Helpers (dates) ────────────────────────────────────────────────────────────
 function toLocalDateStr(d) {
   return d.getFullYear() + "-"
     + String(d.getMonth() + 1).padStart(2, "0") + "-"
@@ -205,6 +291,87 @@ const holidayDateSet = computed(() => {
 // ── Event building ────────────────────────────────────────────────────────────
 const currentSemester = computed(() => semesters.value.find(s => s.is_current) || semesters.value[0])
 
+const activeTimetables = computed(() =>
+  timetableList.value.filter(tt => tt.status !== "archived")
+)
+
+const visibleTimetables = computed(() =>
+  activeTimetables.value.filter(tt => {
+    if (filterDepartmentId.value && timetableDeptId(tt) !== filterDepartmentId.value) return false
+    return true
+  })
+)
+
+const sidebarTimetables = computed(() =>
+  visibleTimetables.value.filter(tt => timetableHasProgramSessions(tt, filterProgramId.value))
+)
+
+const unlinkedTimetables = computed(() =>
+  activeTimetables.value.filter(tt => !resolveSemesterForTimetable(tt))
+)
+
+const filterPrograms = computed(() => {
+  if (!filterDepartmentId.value) return programs.value
+  return programs.value.filter(p => p.department_id === filterDepartmentId.value)
+})
+
+const hasActiveFilters = computed(() =>
+  !!(filterDepartmentId.value || filterProgramId.value)
+)
+
+const overlaySummary = computed(() => {
+  const enabled = sidebarTimetables.value.filter(tt => enabledTimetables.value.has(tt.id))
+  if (!enabled.length) return "No timetables selected on calendar"
+
+  const semLabels = new Map()
+  for (const tt of enabled) {
+    const sem = resolveSemesterForTimetable(tt)
+    if (sem) {
+      semLabels.set(sem.id, `${sem.name} (${formatShortDateRange(sem.start_date, sem.end_date)})`)
+    }
+  }
+  const parts = [...semLabels.values()]
+  const prefix = `Showing ${enabled.length} timetable${enabled.length === 1 ? "" : "s"}`
+  return parts.length ? `${prefix} · ${parts.join(" + ")}` : `${prefix} · some unlinked to a semester`
+})
+
+const timetableGroups = computed(() => {
+  const map = new Map()
+  for (const tt of sidebarTimetables.value) {
+    const sem = resolveSemesterForTimetable(tt)
+    const key = sem?.id || "unlinked"
+    if (!map.has(key)) {
+      map.set(key, {
+        id: key,
+        label: sem?.name || "Unlinked",
+        sem,
+        timetables: [],
+      })
+    }
+    map.get(key).timetables.push(tt)
+  }
+  const groups = [...map.values()]
+  groups.sort((a, b) => {
+    if (a.id === "unlinked") return 1
+    if (b.id === "unlinked") return -1
+    return (a.sem?.semester_number || 0) - (b.sem?.semester_number || 0)
+  })
+  return groups
+})
+
+const activeFilterChips = computed(() => {
+  const chips = []
+  if (filterDepartmentId.value) {
+    const d = departments.value.find(x => x.id === filterDepartmentId.value)
+    chips.push({ key: "dept", label: d?.name || "Department", clear: () => { filterDepartmentId.value = "" } })
+  }
+  if (filterProgramId.value) {
+    const p = programs.value.find(x => x.id === filterProgramId.value)
+    chips.push({ key: "prog", label: p?.name || "Program", clear: () => { filterProgramId.value = "" } })
+  }
+  return chips
+})
+
 const allEvents = computed(() => {
   const events = []
 
@@ -221,7 +388,7 @@ const allEvents = computed(() => {
       backgroundColor: evt.is_cancelled ? "#9CA3AF" : typeColor,
       borderColor: borderClr,
       textColor: "#ffffff",
-      extendedProps: { _source: "calendar", ...evt },
+      extendedProps: { _source: "calendar", event_key: `calendar:${evt.id}`, ...evt },
       classNames: [
         ...(evt.is_cancelled       ? ["fc-event-cancelled"]          : []),
         ...(evt.affects_timetable  ? ["fc-event-affects-timetable"]  : []),
@@ -282,24 +449,22 @@ const allEvents = computed(() => {
     }
   }
 
-  // ── Timetable sessions — one event per occurrence date across ALL enabled timetables.
-  //    Each timetable is paired with its own semester's date range via calendar_semester_id.
+  // ── Timetable sessions — each timetable uses its own resolved semester date range.
   if (showTimetableSessions.value) {
-    for (const tt of timetableList.value) {
+    for (const tt of visibleTimetables.value) {
       if (!enabledTimetables.value.has(tt.id)) continue
       const entries = timetableEntriesMap.value[tt.id] || []
       if (!entries.length) continue
 
-      // Resolve the date range: prefer the semester this timetable was generated for,
-      // fall back to the current/first semester, then to the full academic year.
-      const linkedSem = tt.calendar_semester_id
-        ? semesters.value.find(s => s.id === tt.calendar_semester_id)
-        : null
-      const sem       = linkedSem || currentSemester.value
-      const rangeStart = sem?.start_date || `${currentYear}-01-15`
-      const rangeEnd   = sem?.end_date   || `${currentYear}-12-15`
+      const sem = resolveSemesterForTimetable(tt)
+      if (!sem?.start_date || !sem?.end_date) continue
+
+      const rangeStart = sem.start_date
+      const rangeEnd = sem.end_date
+      const semPalette = semesterColor(sem)
 
       for (const entry of entries) {
+        if (!entryMatchesProgram(entry, filterProgramId.value)) continue
         const slot = entry.time_slot
         if (!slot) continue
         const slotType = slot.slot_type || (slot.is_break ? "break" : "class")
@@ -314,10 +479,10 @@ const allEvents = computed(() => {
           const faded       = isHoliday || period === "break"
           const examSession = period === "exam"
 
-          let bg = "#1D4ED8", border = "#1E40AF"
-          if (isHoliday)            { bg = "#93C5FD"; border = "#60A5FA" }
-          else if (period === "break")  { bg = "#A5B4FC"; border = "#818CF8" }
-          else if (examSession)         { bg = "#F59E0B"; border = "#D97706" }
+          let bg = semPalette.bg, border = semPalette.border
+          if (isHoliday)               { bg = "#93C5FD"; border = "#60A5FA" }
+          else if (period === "break") { bg = "#A5B4FC"; border = "#818CF8" }
+          else if (examSession)        { bg = "#F59E0B"; border = "#D97706" }
 
           events.push({
             id: `sess-${entry.id}-${dateStr}`,
@@ -333,7 +498,12 @@ const allEvents = computed(() => {
               _isFaded: faded,
               _isExam: examSession,
               _timetableName: tt.name,
-              _semesterName: sem?.name || "",
+              _semesterName: sem.name || "",
+              _semesterId: sem.id,
+              _dateRange: formatShortDateRange(rangeStart, rangeEnd),
+              entry_id: entry.id,
+              occurrence_date: dateStr,
+              event_key: `session:${entry.id}:${dateStr}`,
               course: entry.course,
               lecturer: entry.lecturer,
               room: entry.room,
@@ -408,6 +578,11 @@ watch(currentSemester, (sem) => {
   }
 }, { flush: "post" })
 
+watch(filterDepartmentId, async () => {
+  filterProgramId.value = ""
+  await loadPrograms()
+})
+
 // ── Data loading ──────────────────────────────────────────────────────────────
 async function loadAcademicEvents() {
   try {
@@ -426,18 +601,57 @@ async function loadSemesters() {
   } catch { semesters.value = [] }
 }
 
+async function loadDepartments() {
+  try {
+    const { data } = await resourcesApi.departments()
+    departments.value = data.data || []
+  } catch { departments.value = [] }
+}
+
+async function loadPrograms() {
+  try {
+    const params = filterDepartmentId.value ? { department_id: filterDepartmentId.value } : {}
+    const { data } = await resourcesApi.programs(params)
+    programs.value = data.data || []
+  } catch { programs.value = [] }
+}
+
+async function backfillSemesterLinks() {
+  if (!auth.isAdmin && !auth.isTimetableOfficer) return
+  for (const tt of timetableList.value) {
+    if (tt.calendar_semester_id) continue
+    const sem = resolveSemesterForTimetable(tt)
+    if (!sem) continue
+    try {
+      await timetableApi.update(tt.id, { calendar_semester_id: sem.id })
+      tt.calendar_semester_id = sem.id
+    } catch { /* best-effort */ }
+  }
+}
+
+function clearFilters() {
+  filterDepartmentId.value = ""
+  filterProgramId.value = ""
+}
+
+function toggleTimetableEnabled(ttId, checked) {
+  const s = new Set(enabledTimetables.value)
+  if (checked) s.add(ttId)
+  else s.delete(ttId)
+  enabledTimetables.value = s
+}
+
 async function loadTimetables() {
   try {
     const { data } = await timetableApi.list({})
     timetableList.value = data.data || []
-    // Enable all non-archived timetables by default
+    await backfillSemesterLinks()
     const enabled = new Set(
       timetableList.value
         .filter(t => t.status !== "archived")
         .map(t => t.id)
     )
     enabledTimetables.value = enabled
-    // Load entries for all timetables in parallel
     await loadAllTimetableEntries()
   } catch { timetableList.value = [] }
 }
@@ -681,25 +895,201 @@ async function updateEvent() {
   } finally { updating.value = false }
 }
 
+function reminderApiError(e, fallback) {
+  if (e?.response?.status === 404) {
+    return "Reminder service not available. Backend may need a restart."
+  }
+  return getErrorMessage(e, fallback)
+}
+
 async function sendReminder() {
+  if (!selectedEvent.value) return
+  if (!reminderForm.leadTimes.length) {
+    toast.error("Select at least one reminder time.")
+    return
+  }
+
   sendingReminder.value = true
   try {
     const evt = selectedEvent.value
-    await notificationApi.send({
-      recipient_id: auth.user?.id,
-      email: auth.user?.email,
-      phone: auth.user?.phone,
-      channel: reminderForm.channel,
-      type: "reminder",
-      subject: `Reminder: ${evt.title}`,
-      body: `You have an upcoming event: "${evt.title}" on ${formatDate(evt.start)}${evt.location ? " at " + evt.location : ""}.`,
-    })
-    toast.success("Reminder set.")
+    const payload = buildReminderPayload(evt)
+    const { data } = await notificationApi.reminders.create(payload)
+    const count = data.data?.length || 0
+    toast.success(data.message || `${count} reminder(s) scheduled.`)
     showReminderForm.value = false
+    await loadExistingReminders(evt)
   } catch (e) {
-    toast.error(getErrorMessage(e, "Failed to set reminder."))
-  } finally { sendingReminder.value = false }
+    toast.error(reminderApiError(e, "Failed to set reminder."))
+  } finally {
+    sendingReminder.value = false
+  }
 }
+
+async function savePhoneAndRemind() {
+  const phoneError = validatePhone(reminderForm.phone)
+  if (phoneError) {
+    toast.error(phoneError)
+    return
+  }
+  sendingReminder.value = true
+  try {
+    await usersApi.update(auth.user.id, { phone: reminderForm.phone.trim() })
+    await auth.fetchMe()
+    reminderForm.phone = auth.user?.phone || reminderForm.phone
+    const evt = selectedEvent.value
+    const payload = buildReminderPayload(evt)
+    const { data } = await notificationApi.reminders.create(payload)
+    const count = data.data?.length || 0
+    toast.success(data.message || `${count} reminder(s) scheduled.`)
+    showReminderForm.value = false
+    await loadExistingReminders(evt)
+  } catch (e) {
+    toast.error(reminderApiError(e, "Failed to save phone or set reminder."))
+  } finally {
+    sendingReminder.value = false
+  }
+}
+
+async function openReminderForm() {
+  showReminderForm.value = true
+  loadingReminders.value = true
+  try {
+    await auth.fetchMe()
+    const hasPhone = !!auth.user?.phone?.trim()
+    const hasEmail = !!auth.user?.email?.trim()
+    reminderForm.channel = hasPhone ? "sms" : (hasEmail ? "email" : "sms")
+    reminderForm.phone = auth.user?.phone || ""
+    if (!reminderForm.leadTimes.length) {
+      reminderForm.leadTimes = [60]
+    }
+    await loadExistingReminders(selectedEvent.value)
+  } catch (e) {
+    toast.error(getErrorMessage(e, "Could not load your profile."))
+  } finally {
+    loadingReminders.value = false
+  }
+}
+
+async function loadExistingReminders(evt) {
+  const eventKey = getEventKey(evt)
+  if (!eventKey) {
+    existingReminders.value = []
+    return
+  }
+  try {
+    const { data } = await notificationApi.reminders.list({ event_key: eventKey })
+    existingReminders.value = data.data || []
+  } catch (e) {
+    existingReminders.value = []
+    if (e?.response?.status === 404) {
+      toast.warning("Reminder service not available. Backend may need a restart.")
+    }
+  }
+}
+
+async function cancelExistingReminder(reminderId) {
+  cancellingReminderId.value = reminderId
+  try {
+    await notificationApi.reminders.cancel(reminderId)
+    toast.success("Reminder cancelled.")
+    await loadExistingReminders(selectedEvent.value)
+  } catch (e) {
+    toast.error(reminderApiError(e, "Failed to cancel reminder."))
+  } finally {
+    cancellingReminderId.value = null
+  }
+}
+
+function toggleLeadTime(minutes) {
+  const idx = reminderForm.leadTimes.indexOf(minutes)
+  if (idx >= 0) {
+    reminderForm.leadTimes.splice(idx, 1)
+  } else {
+    reminderForm.leadTimes.push(minutes)
+  }
+}
+
+function getEventKey(evt) {
+  if (!evt) return null
+  if (evt.event_key) return evt.event_key
+  if (evt._source === "session" && evt.entry_id && evt.occurrence_date) {
+    return `session:${evt.entry_id}:${evt.occurrence_date}`
+  }
+  if (evt._source === "calendar" && evt.id) {
+    return `calendar:${evt.id}`
+  }
+  return null
+}
+
+function buildReminderPayload(evt) {
+  const eventKey = getEventKey(evt)
+  const eventSource = evt._source === "session" ? "session" : "calendar"
+  const start = evt.start instanceof Date ? evt.start : new Date(evt.start)
+  const end = evt.end ? (evt.end instanceof Date ? evt.end : new Date(evt.end)) : null
+
+  return {
+    event_source: eventSource,
+    event_key: eventKey,
+    event_title: evt.title,
+    event_start: start.toISOString(),
+    event_end: end ? end.toISOString() : undefined,
+    channel: reminderForm.channel,
+    lead_times: [...reminderForm.leadTimes],
+    metadata: {
+      course_code: evt.course?.code,
+      course_name: evt.course?.name,
+      room: evt.room?.code || evt.room?.name || evt.location,
+      entry_id: evt.entry_id,
+      occurrence_date: evt.occurrence_date,
+    },
+  }
+}
+
+function leadLabel(minutes) {
+  return LEAD_OPTIONS.find(o => o.minutes === minutes)?.label || `${minutes} min before`
+}
+
+function formatReminderTime(iso) {
+  if (!iso) return "—"
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: "short", month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  })
+}
+
+function setReminderChannel(channel) {
+  if (channel === "email" && !userHasEmail.value) {
+    toast.error("Add an email address in your profile to receive email reminders.")
+    return
+  }
+  if (channel === "both" && !userHasEmail.value) {
+    toast.error("Email is required for the Both channel. Update your profile first.")
+    return
+  }
+  reminderForm.channel = channel
+}
+
+const userHasPhone = computed(() => !!auth.user?.phone?.trim())
+const userHasEmail = computed(() => !!auth.user?.email?.trim())
+const effectivePhone = computed(() => auth.user?.phone?.trim() || reminderForm.phone?.trim())
+const channelNeedsPhone = computed(() => ["sms", "both"].includes(reminderForm.channel))
+const showPhoneCapture = computed(() => channelNeedsPhone.value && !userHasPhone.value)
+const needsPhoneSave = computed(() => showPhoneCapture.value && !!reminderForm.phone?.trim())
+const canSubmitReminder = computed(() => {
+  if (!reminderForm.leadTimes.length || sendingReminder.value) return false
+  if (reminderForm.channel === "email") return userHasEmail.value
+  if (reminderForm.channel === "sms") return !!effectivePhone.value
+  if (reminderForm.channel === "both") return !!effectivePhone.value && userHasEmail.value
+  return false
+})
+const primaryReminderLabel = computed(() => {
+  if (sendingReminder.value) return needsPhoneSave.value ? "Saving…" : "Scheduling…"
+  if (needsPhoneSave.value) return "Save phone & set reminder(s)"
+  return "Set reminder(s)"
+})
+const pendingReminders = computed(() =>
+  existingReminders.value.filter(r => r.status === "pending")
+)
 
 // ── Misc helpers ──────────────────────────────────────────────────────────────
 function closeCreateModal() {
@@ -748,8 +1138,11 @@ watch(countryCode, loadPublicHolidays)
 
 onMounted(async () => {
   loading.value = true
+  await loadSemesters()
+  await loadDepartments()
+  await loadPrograms()
   await Promise.all([
-    loadAcademicEvents(), loadSemesters(), loadTimetables(),
+    loadAcademicEvents(), loadTimetables(),
     loadPublicHolidays(), loadInstitutionalHolidays(),
   ])
   loading.value = false
@@ -764,13 +1157,14 @@ onMounted(async () => {
       <div>
         <h1 class="text-2xl font-bold text-gray-900">Academic Calendar</h1>
         <p class="text-sm text-gray-500 mt-0.5">
-          <span v-if="currentSemester">
+          <span v-if="showTimetableSessions && activeTimetables.length">{{ overlaySummary }}</span>
+          <span v-else-if="currentSemester">
             {{ currentSemester.name }} · {{ currentSemester.academic_year }}
             <span class="text-gray-400">
               · {{ formatDateOnly(currentSemester.start_date) }} → {{ formatDateOnly(currentSemester.end_date) }}
             </span>
           </span>
-          <span v-else class="text-amber-600 font-medium">No semester configured — sessions use full-year range</span>
+          <span v-else class="text-amber-600 font-medium">No semester configured</span>
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -791,7 +1185,49 @@ onMounted(async () => {
     <div class="flex gap-4 min-h-0 flex-1">
 
       <!-- ── Sidebar ──────────────────────────────────────────────────────── -->
-      <aside v-if="showSidebar" class="w-64 flex-shrink-0 space-y-4 overflow-y-auto pb-4">
+      <aside v-if="showSidebar" class="w-72 flex-shrink-0 space-y-4 overflow-y-auto pb-4">
+
+        <!-- Filters -->
+        <div class="card p-4 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Filters</h3>
+            <button
+              v-if="hasActiveFilters"
+              type="button"
+              class="text-xs text-blue-600 hover:underline"
+              @click="clearFilters"
+            >
+              Clear
+            </button>
+          </div>
+
+          <div>
+            <label class="label text-xs">Department</label>
+            <select v-model="filterDepartmentId" class="input text-sm">
+              <option value="">All departments</option>
+              <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="label text-xs">Program</label>
+            <select v-model="filterProgramId" class="input text-sm" :disabled="!filterPrograms.length">
+              <option value="">All programs</option>
+              <option v-for="p in filterPrograms" :key="p.id" :value="p.id">{{ p.name }} ({{ p.code }})</option>
+            </select>
+          </div>
+
+          <div v-if="activeFilterChips.length" class="flex flex-wrap gap-1.5 pt-1">
+            <span
+              v-for="chip in activeFilterChips"
+              :key="chip.key"
+              class="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-800 rounded-full px-2 py-0.5"
+            >
+              {{ chip.label }}
+              <button type="button" class="hover:text-blue-950" @click="chip.clear">×</button>
+            </span>
+          </div>
+        </div>
 
         <!-- Timetable overlay -->
         <div class="card p-4 space-y-3">
@@ -801,43 +1237,67 @@ onMounted(async () => {
             <span class="text-gray-700">Show class sessions</span>
           </label>
 
-          <!-- Per-timetable checkboxes (each uses its own semester's date range) -->
-          <div v-if="showTimetableSessions && timetableList.length" class="space-y-1.5">
-            <p class="text-xs text-gray-400">Showing each timetable in its own semester range:</p>
-            <label
-              v-for="tt in timetableList" :key="tt.id"
-              class="flex items-start gap-2 text-xs cursor-pointer group"
-            >
-              <input
-                type="checkbox"
-                class="rounded text-blue-600 mt-0.5 flex-shrink-0"
-                :checked="enabledTimetables.has(tt.id)"
-                @change="e => { const s = new Set(enabledTimetables); e.target.checked ? s.add(tt.id) : s.delete(tt.id); enabledTimetables = s }"
-              />
-              <span class="leading-tight">
-                <span class="font-medium text-gray-800 block">{{ tt.name }}</span>
-                <span class="text-gray-400">
-                  Sem {{ tt.semester }} · {{ tt.academic_year }}
-                  <span v-if="tt.calendar_semester_id"
-                    class="text-blue-500 ml-1"
-                    :title="semesters.find(s=>s.id===tt.calendar_semester_id)?.name || 'Linked semester'">
-                    🔗
-                  </span>
-                  <span v-else class="text-amber-500 ml-1" title="Not linked to a semester — uses current semester range">⚠</span>
-                </span>
-                <span
-                  class="inline-block mt-0.5 px-1 rounded text-white text-[10px] leading-4"
-                  :class="tt.status==='active'?'bg-green-500':tt.status==='archived'?'bg-gray-400':'bg-amber-400'">
-                  {{ tt.status }}
-                </span>
-              </span>
-            </label>
-            <p v-if="!timetableList.length" class="text-xs text-gray-400 italic">No timetables found.</p>
+          <div v-if="unlinkedTimetables.length" class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+            {{ unlinkedTimetables.length }} timetable(s) could not be matched to a semester — sessions hidden until linked.
           </div>
+
+          <!-- Grouped by semester -->
+          <div v-if="showTimetableSessions && timetableGroups.length" class="space-y-3">
+            <details
+              v-for="group in timetableGroups"
+              :key="group.id"
+              class="group"
+              :open="group.id !== 'unlinked'"
+            >
+              <summary class="cursor-pointer text-xs font-semibold text-gray-600 flex items-center justify-between py-1">
+                <span>{{ group.label }}</span>
+                <span v-if="group.sem" class="text-gray-400 font-normal">
+                  {{ formatShortDateRange(group.sem.start_date, group.sem.end_date) }}
+                </span>
+              </summary>
+              <div class="space-y-1.5 mt-1 pl-1 border-l-2 border-gray-100 ml-1">
+                <label
+                  v-for="tt in group.timetables"
+                  :key="tt.id"
+                  class="flex items-start gap-2 text-xs cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    class="rounded text-blue-600 mt-0.5 flex-shrink-0"
+                    :checked="enabledTimetables.has(tt.id)"
+                    @change="toggleTimetableEnabled(tt.id, $event.target.checked)"
+                  />
+                  <span class="leading-tight min-w-0">
+                    <span class="font-medium text-gray-800 block truncate">{{ tt.name }}</span>
+                    <span class="text-gray-400 block">
+                      {{ tt.department?.name || "Dept" }}
+                      <span v-if="tt.program"> · {{ tt.program.code || tt.program.name }}</span>
+                    </span>
+                    <span v-if="resolveSemesterForTimetable(tt)" class="text-gray-400 block">
+                      {{ formatShortDateRange(
+                        resolveSemesterForTimetable(tt).start_date,
+                        resolveSemesterForTimetable(tt).end_date
+                      ) }}
+                    </span>
+                    <span v-else class="text-amber-600 block">Not linked to semester</span>
+                    <span
+                      class="inline-block mt-0.5 px-1 rounded text-white text-[10px] leading-4"
+                      :class="tt.status==='active'?'bg-green-500':tt.status==='archived'?'bg-gray-400':'bg-amber-400'">
+                      {{ tt.status }}
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </details>
+          </div>
+          <p v-else-if="showTimetableSessions && !timetableGroups.length" class="text-xs text-gray-400 italic">
+            No timetables match current filters.
+          </p>
 
           <!-- Session legend -->
           <div v-if="showTimetableSessions" class="pt-1 space-y-1 text-xs text-gray-500 border-t border-gray-100">
-            <div class="flex items-center gap-2"><span class="w-3 h-2 rounded bg-blue-700 inline-block"></span>Regular class</div>
+            <div class="flex items-center gap-2"><span class="w-3 h-2 rounded bg-blue-700 inline-block"></span>Semester 1 classes</div>
+            <div class="flex items-center gap-2"><span class="w-3 h-2 rounded bg-indigo-700 inline-block"></span>Semester 2 classes</div>
             <div class="flex items-center gap-2"><span class="w-3 h-2 rounded bg-amber-400 inline-block"></span>Exam period</div>
             <div class="flex items-center gap-2 opacity-50"><span class="w-3 h-2 rounded bg-indigo-400 inline-block"></span>Semester break</div>
             <div class="flex items-center gap-2 opacity-30"><span class="w-3 h-2 rounded bg-blue-300 inline-block"></span>Public holiday</div>
@@ -1249,25 +1709,101 @@ onMounted(async () => {
             <!-- Reminder form -->
             <div v-if="showReminderForm" class="border-t border-gray-100 pt-4 space-y-3">
               <h3 class="text-sm font-semibold text-gray-900">Set Reminder</h3>
-              <div class="grid grid-cols-2 gap-3">
+
+              <div v-if="loadingReminders" class="text-xs text-gray-500">Loading your contact info…</div>
+
+              <div v-else class="space-y-3">
+                <!-- Channel -->
                 <div>
                   <label class="label text-xs">Channel</label>
-                  <select v-model="reminderForm.channel" class="input text-sm">
-                    <option value="email">Email</option>
-                    <option value="sms">SMS</option>
-                    <option value="both">Email + SMS</option>
-                  </select>
+                  <div class="flex rounded-lg border border-gray-200 overflow-hidden mt-1">
+                    <button
+                      v-for="ch in REMINDER_CHANNELS"
+                      :key="ch.value"
+                      type="button"
+                      class="flex-1 text-xs py-2 px-2 transition-colors"
+                      :class="reminderForm.channel === ch.value
+                        ? 'bg-blue-600 text-white font-medium'
+                        : 'bg-white text-gray-600 hover:bg-gray-50'"
+                      @click="setReminderChannel(ch.value)"
+                    >
+                      {{ ch.label }}
+                    </button>
+                  </div>
                 </div>
+
+                <!-- Contact info -->
+                <div v-if="userHasPhone && channelNeedsPhone" class="text-xs bg-green-50 text-green-800 rounded-lg px-3 py-2">
+                  SMS will be sent to <strong>{{ auth.user.phone }}</strong>
+                </div>
+                <div v-else-if="reminderForm.channel === 'email' && userHasEmail" class="text-xs bg-blue-50 text-blue-800 rounded-lg px-3 py-2">
+                  Email will be sent to <strong>{{ auth.user.email }}</strong>
+                </div>
+                <div v-else-if="reminderForm.channel === 'both' && userHasPhone && userHasEmail" class="text-xs bg-green-50 text-green-800 rounded-lg px-3 py-2">
+                  SMS to <strong>{{ auth.user.phone }}</strong> and email to <strong>{{ auth.user.email }}</strong>
+                </div>
+                <div v-if="showPhoneCapture" class="text-xs bg-amber-50 text-amber-800 rounded-lg px-3 py-2 space-y-2">
+                  <p>Enter your phone number to receive SMS reminders.</p>
+                  <input
+                    v-model="reminderForm.phone"
+                    type="tel"
+                    class="input text-sm w-full"
+                    placeholder="+255712345678"
+                  />
+                  <p v-if="!reminderForm.phone?.trim()" class="text-amber-700">Enter your phone number for SMS</p>
+                  <router-link to="/profile" class="text-blue-700 hover:underline inline-block" @click="showDetailModal = false">
+                    Or update phone in Profile
+                  </router-link>
+                </div>
+
+                <!-- Existing reminders -->
+                <div v-if="pendingReminders.length" class="space-y-1">
+                  <p class="text-xs font-medium text-gray-600">Scheduled reminders</p>
+                  <div
+                    v-for="rem in pendingReminders"
+                    :key="rem.id"
+                    class="flex items-center justify-between text-xs bg-gray-50 rounded px-2 py-1.5"
+                  >
+                    <span>{{ leadLabel(rem.lead_minutes) }} · {{ formatReminderTime(rem.scheduled_at) }}</span>
+                    <button
+                      class="text-red-600 hover:underline"
+                      :disabled="cancellingReminderId === rem.id"
+                      @click="cancelExistingReminder(rem.id)"
+                    >
+                      {{ cancellingReminderId === rem.id ? "…" : "Cancel" }}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Lead times -->
                 <div>
-                  <label class="label text-xs">Remind at (optional)</label>
-                  <input v-model="reminderForm.scheduled_at" type="datetime-local" class="input text-sm"/>
+                  <label class="label text-xs">Remind me</label>
+                  <div class="grid grid-cols-2 gap-2 mt-1">
+                    <label
+                      v-for="opt in LEAD_OPTIONS"
+                      :key="opt.minutes"
+                      class="flex items-center gap-2 text-sm cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="reminderForm.leadTimes.includes(opt.minutes)"
+                        @change="toggleLeadTime(opt.minutes)"
+                      />
+                      {{ opt.label }}
+                    </label>
+                  </div>
                 </div>
-              </div>
-              <div class="flex gap-2">
-                <button class="btn-secondary text-sm" @click="showReminderForm = false">Cancel</button>
-                <button class="btn-primary text-sm" :disabled="sendingReminder" @click="sendReminder">
-                  {{ sendingReminder ? "Sending…" : "Set Reminder" }}
-                </button>
+
+                <div class="flex gap-2">
+                  <button class="btn-secondary text-sm" @click="showReminderForm = false">Back</button>
+                  <button
+                    class="btn-primary text-sm"
+                    :disabled="!canSubmitReminder"
+                    @click="needsPhoneSave ? savePhoneAndRemind() : sendReminder()"
+                  >
+                    {{ primaryReminderLabel }}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1285,7 +1821,7 @@ onMounted(async () => {
 
             <!-- Actions -->
             <div v-if="!showReminderForm && !showCancelForm" class="border-t border-gray-100 pt-4 flex flex-wrap gap-2">
-              <button class="btn-secondary text-sm" @click="showReminderForm = true">
+              <button class="btn-secondary text-sm" @click="openReminderForm">
                 🔔 Remind Me
               </button>
               <template v-if="canManage && isCalendarSource">

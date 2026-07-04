@@ -71,6 +71,7 @@ services:
       # Merged at startup: base routes + consumers fragment (JWT key/secret from configs)
       KONG_DECLARATIVE_CONFIG: /tmp/kong-merged.yml
       # Refresh DNS fast when Docker recreates containers (avoids stale upstream IPs).
+      # After rebuild: docker compose restart kong  OR  bash scripts/restart-backend.sh <service>
       KONG_DNS_STALE_TTL: 1
       KONG_DNS_ERROR_TTL: 1
       KONG_DNS_TTL: 5
@@ -164,6 +165,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${TIMETABLE_DB:-timetable_db}
       REDIS_URL: redis://redis:6379/0
       NOTIFICATION_SERVICE_URL: http://notification-service:5004
+      CALENDAR_SERVICE_URL: http://calendar-service:5005
       TIMETABLE_NOTIFY_ENABLED: ${TIMETABLE_NOTIFY_ENABLED:-true}
       AUDIT_SERVICE_URL: http://audit-service:5008
     ports:

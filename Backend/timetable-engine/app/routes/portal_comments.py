@@ -4,6 +4,7 @@ from flask_jwt_extended import get_jwt, get_jwt_identity
 from app.extensions import db
 from app.models.domain import StudentGroup, Timetable, TimetableEntry, TimetableComment
 from app.security import portal_jwt_required
+from app.services.semester_dates import resolve_semester_dates
 from app.utils.responses import fail, json_body, ok
 
 portal_bp = Blueprint("portal", __name__, url_prefix="/api/v1/portal")
@@ -90,6 +91,7 @@ def portal_timetable_semesters():
             "timetable_id": tt.id,
             "name": tt.name,
             "academic_year": tt.academic_year,
+            **resolve_semester_dates(tt),
         }
         for tt in timetables
     ])

@@ -31,5 +31,9 @@ celery.conf.update(
             "task": "tasks.schedule_calendar_event_reminders",
             "schedule": crontab(hour=7, minute=0),
         },
+        "process-due-reminders": {
+            "task": "tasks.process_due_reminders",
+            "schedule": crontab(minute="*/5"),
+        },
     },
 )
