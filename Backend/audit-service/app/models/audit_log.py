@@ -8,6 +8,8 @@ class AuditLog(db.Model):
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(db.String(36), index=True)
+    user_email = db.Column(db.String(255), index=True)
+    user_name = db.Column(db.String(200))
     university_id = db.Column(db.String(36), nullable=True, index=True)
     action = db.Column(db.String(100), nullable=False)
     resource_type = db.Column(db.String(100))
@@ -23,6 +25,8 @@ class AuditLog(db.Model):
     def to_dict(self):
         return {
             "id": self.id, "user_id": self.user_id,
+            "user_email": self.user_email,
+            "user_name": self.user_name,
             "university_id": self.university_id,
             "action": self.action,
             "resource_type": self.resource_type, "resource_id": self.resource_id,
@@ -30,3 +34,12 @@ class AuditLog(db.Model):
             "service": self.service, "status": self.status,
             "metadata": self.metadata_, "created_at": self.created_at.isoformat(),
         }
+
+    def display_user(self) -> str:
+        if self.user_name:
+            return self.user_name
+        if self.user_email:
+            return self.user_email
+        if self.user_id:
+            return f"User {self.user_id[:8]}…"
+        return "System"

@@ -548,6 +548,41 @@ class TimetableSnapshot(db.Model):
         }
 
 
+class TimetableComment(db.Model):
+    __tablename__ = "timetable_comments"
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    entry_id = db.Column(db.String(36), db.ForeignKey("timetable_entries.id"), nullable=False, index=True)
+    timetable_id = db.Column(db.String(36), db.ForeignKey("timetables.id"), nullable=False, index=True)
+    student_user_id = db.Column(db.String(36), nullable=False, index=True)
+    registration_number = db.Column(db.String(50))
+    student_name = db.Column(db.String(200))
+    body = db.Column(db.String(500), nullable=False)
+    status = db.Column(db.String(20), default="visible")  # visible | hidden
+    admin_reply = db.Column(db.String(500))
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    entry = db.relationship("TimetableEntry")
+    timetable = db.relationship("Timetable")
+
+    def to_dict(self, include_context=False):
+        d = {
+            "id": self.id,
+            "entry_id": self.entry_id,
+            "timetable_id": self.timetable_id,
+            "student_user_id": self.student_user_id,
+            "registration_number": self.registration_number,
+            "student_name": self.student_name,
+            "body": self.body,
+            "status": self.status,
+            "admin_reply": self.admin_reply,
+            "created_at": self.created_at.isoformat(),
+        }
+        if include_context and self.entry:
+            d["entry"] = self.entry.to_dict()
+        return d
+
+
 class Constraint(db.Model):
     """
     Structured scheduling constraint loaded into the GA fitness evaluator.

@@ -199,6 +199,7 @@ export const notificationApi = {
   list: () => api.get("/notifications/"),
   templates: () => api.get("/notifications/templates"),
   broadcast: (data) => api.post("/notifications/broadcast", data),
+  classAnnounce: (data) => api.post("/notifications/class-announcement", data),
 }
 
 export const calendarApi = {
@@ -259,7 +260,45 @@ export const usersApi = {
   rejectUser: (id) => api.patch(`/users/${id}/reject`),
   roles: () => api.get("/users/roles/all"),
   createLecturer: (data) => api.post("/users/lecturers", data),
+  createStudent: (data) => api.post("/users/students", data),
   resendCredentials: (id) => api.post(`/users/${id}/resend-credentials`),
+}
+
+const PORTAL_TOKEN_KEY = "portal_access_token"
+
+const portalClient = axios.create({
+  baseURL: BASE,
+  timeout: 30000,
+  headers: { "Content-Type": "application/json" },
+})
+
+portalClient.interceptors.request.use((config) => {
+  const token = sessionStorage.getItem(PORTAL_TOKEN_KEY)
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
+export function setPortalToken(token) {
+  if (token) sessionStorage.setItem(PORTAL_TOKEN_KEY, token)
+  else sessionStorage.removeItem(PORTAL_TOKEN_KEY)
+}
+
+export function getPortalToken() {
+  return sessionStorage.getItem(PORTAL_TOKEN_KEY)
+}
+
+export const portalApi = {
+  session: (data) => axios.post(`${BASE}/portal/session`, data),
+  subscribe: (data) => portalClient.post("/portal/subscribe", data),
+  timetableSemesters: () => portalClient.get("/portal/timetable/semesters"),
+  timetable: (params) => portalClient.get("/portal/timetable", { params }),
+  comments: () => portalClient.get("/portal/comments"),
+  createComment: (data) => portalClient.post("/portal/comments", data),
+}
+
+export const adminCommentsApi = {
+  list: (params) => api.get("/admin/comments/", { params }),
+  update: (id, data) => api.patch(`/admin/comments/${id}`, data),
 }
 
 export const academicYearsApi = {
@@ -273,5 +312,5 @@ export const academicYearsApi = {
 export const auditApi = {
   list: (params) => api.get("/audit/logs", { params }),
   userActivity: (userId) => api.get(`/audit/logs/user/${userId}`),
-  stats: () => api.get("/audit/logs/stats"),
+  stats: (params) => api.get("/audit/logs/stats", { params }),
 }

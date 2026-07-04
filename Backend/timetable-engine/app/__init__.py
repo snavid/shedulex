@@ -17,9 +17,11 @@ def create_app(config_name: str = None) -> Flask:
     jwt.init_app(app)
     cors.init_app(app, resources={r"/api/*": {"origins": "*"}})
 
-    from app.routes import timetable_bp, resources_bp
+    from app.routes import timetable_bp, resources_bp, portal_bp, admin_comments_bp
     app.register_blueprint(timetable_bp)
     app.register_blueprint(resources_bp)
+    app.register_blueprint(portal_bp)
+    app.register_blueprint(admin_comments_bp)
 
     @app.get("/health")
     def health():
@@ -35,5 +37,8 @@ def create_app(config_name: str = None) -> Flask:
             seed_default_slots()
         except Exception as exc:
             logger.warning("seed_default_slots() failed (non-fatal): %s", exc)
+
+    from shared.audit_client import register_audit_middleware
+    register_audit_middleware(app, "timetable-engine")
 
     return app

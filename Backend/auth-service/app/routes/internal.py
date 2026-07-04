@@ -98,3 +98,28 @@ def get_recipient(user_id):
             "last_name": user.last_name,
         },
     }), 200
+
+
+@internal_bp.post("/batch")
+def batch_users():
+    denied = require_internal_key()
+    if denied:
+        return denied
+
+    body = request.get_json() or {}
+    ids = body.get("ids") or []
+    if not ids:
+        return jsonify({"success": True, "data": {}}), 200
+
+    users = User.query.filter(User.id.in_(ids)).all()
+    data = {}
+    for user in users:
+        name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+        data[user.id] = {
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "display_name": name or user.email,
+            "role": user.role.name if user.role else None,
+        }
+    return jsonify({"success": True, "data": data}), 200

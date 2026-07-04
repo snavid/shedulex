@@ -96,6 +96,7 @@ def broadcast():
         }), 422
     department_id = body.get("department_id")
     program_id = body.get("program_id")
+    student_group_id = body.get("student_group_id")
 
     from app.tasks.reminder_tasks import broadcast_announcement
     enqueue_task(
@@ -107,9 +108,61 @@ def broadcast():
         university_id=university_id,
         department_id=department_id,
         program_id=program_id,
+        student_group_id=student_group_id,
         recipient_ids=body.get("recipient_ids") or [],
     )
     return jsonify({"success": True, "message": "Broadcast queued."}), 202
+
+
+@notifications_bp.post("/class-announcement")
+@jwt_required()
+def class_announcement():
+    claims = get_jwt()
+    if claims.get("role") not in ("admin", "lecturer", "timetable_officer", "hod"):
+        return jsonify({"success": False, "message": "Forbidden."}), 403
+
+    body = request.get_json() or {}
+    entry_id = body.get("entry_id")
+    message = (body.get("message") or "").strip()
+    channel = body.get("channel", "sms")
+    if not entry_id:
+        return jsonify({"success": False, "message": "entry_id is required."}), 422
+    if not message:
+        return jsonify({"success": False, "message": "Message body is required."}), 422
+
+    from app.services.timetable_client import get_timetable_entry
+    from app.tasks.reminder_tasks import broadcast_announcement
+
+    entry = get_timetable_entry(entry_id)
+    if not entry:
+        return jsonify({"success": False, "message": "Timetable entry not found."}), 404
+
+    student_group = entry.get("student_group") or {}
+    student_group_id = student_group.get("id") or entry.get("student_group_id")
+    if not student_group_id:
+        return jsonify({"success": False, "message": "This session has no student group assigned."}), 422
+
+    course = entry.get("course") or {}
+    subject = body.get("subject") or course.get("name") or "Class Announcement"
+    university_id = claims.get("university_id")
+    dept = course.get("department") or {}
+    if not university_id:
+        university_id = dept.get("university_id")
+
+    enqueue_task(
+        broadcast_announcement,
+        subject=subject,
+        body=message,
+        audience="students",
+        channel=channel,
+        university_id=university_id,
+        student_group_id=student_group_id,
+    )
+    group_name = student_group.get("name") or "class"
+    return jsonify({
+        "success": True,
+        "message": f"Announcement queued for {group_name} students.",
+    }), 202
 
 
 @notifications_bp.get("/")

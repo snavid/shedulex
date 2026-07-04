@@ -9,6 +9,7 @@ from app.schemas import (
 from app.services import auth_service
 from app.services.token_service import generate_tokens, blacklist_token, is_token_blacklisted
 from app.models.user import User
+from shared.audit_client import record_audit
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/v1/auth")
 
@@ -59,7 +60,39 @@ def login():
     try:
         user, tokens = auth_service.login_user(data["email"], data["password"])
     except (ValueError, PermissionError) as e:
+        failed_user = User.query.filter_by(email=data["email"].lower()).first()
+        failed_name = (
+            f"{failed_user.first_name} {failed_user.last_name}".strip()
+            if failed_user else None
+        )
+        record_audit(
+            service="auth-service",
+            action="auth.login",
+            user_id=str(failed_user.id) if failed_user else None,
+            user_email=failed_user.email if failed_user else data["email"],
+            user_name=failed_name or data["email"],
+            university_id=str(failed_user.university_id) if failed_user and failed_user.university_id else None,
+            description=f"Failed login attempt for {data['email']}",
+            status="failure",
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent", "")[:500],
+            metadata={"email": data["email"], "reason": str(e)},
+        )
         return jsonify({"success": False, "message": str(e)}), 401
+
+    user_display = f"{user.first_name} {user.last_name}".strip() or user.email
+    record_audit(
+        service="auth-service",
+        action="auth.login",
+        user_id=str(user.id),
+        user_email=user.email,
+        user_name=user_display,
+        university_id=str(user.university_id) if user.university_id else None,
+        description=f"{user.email} logged in",
+        ip_address=request.remote_addr,
+        user_agent=request.headers.get("User-Agent", "")[:500],
+        metadata={"role": user.role.name if user.role else None},
+    )
 
     return jsonify({
         "success": True,
@@ -89,7 +122,19 @@ def refresh():
 @jwt_required()
 def logout():
     claims = get_jwt()
-    auth_service.logout_user(claims["jti"], get_jwt_identity())
+    user_id = get_jwt_identity()
+    auth_service.logout_user(claims["jti"], user_id)
+    record_audit(
+        service="auth-service",
+        action="auth.logout",
+        user_id=user_id,
+        user_email=claims.get("email"),
+        user_name=claims.get("email"),
+        university_id=claims.get("university_id"),
+        description=f"{claims.get('email', 'User')} logged out",
+        ip_address=request.remote_addr,
+        user_agent=request.headers.get("User-Agent", "")[:500],
+    )
     return jsonify({"success": True, "message": "Logged out successfully."}), 200
 
 

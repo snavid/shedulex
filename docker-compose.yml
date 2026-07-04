@@ -130,13 +130,14 @@ services:
   # ── Microservices ────────────────────────────────────────────────────────────
   auth-service:
     build:
-      context: ./Backend/auth-service
-      dockerfile: Dockerfile
+      context: ./Backend
+      dockerfile: auth-service/Dockerfile
     container_name: shedulex-auth
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${AUTH_DB:-auth_db}
       REDIS_URL: redis://redis:6379/0
+      AUDIT_SERVICE_URL: http://audit-service:5008
     ports:
       - "5001:5001"
     restart: unless-stopped
@@ -155,8 +156,8 @@ services:
 
   timetable-engine:
     build:
-      context: ./Backend/timetable-engine
-      dockerfile: Dockerfile
+      context: ./Backend
+      dockerfile: timetable-engine/Dockerfile
     container_name: shedulex-timetable
     env_file: .env
     environment:
@@ -164,6 +165,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       NOTIFICATION_SERVICE_URL: http://notification-service:5004
       TIMETABLE_NOTIFY_ENABLED: ${TIMETABLE_NOTIFY_ENABLED:-true}
+      AUDIT_SERVICE_URL: http://audit-service:5008
     ports:
       - "5002:5002"
     networks:
@@ -392,6 +394,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${AUDIT_DB:-audit_db}
       REDIS_URL: redis://redis:6379/0
+      AUTH_SERVICE_URL: http://auth-service:5001
     ports:
       - "5008:5008"
     networks:

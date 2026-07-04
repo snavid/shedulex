@@ -108,6 +108,25 @@ def swap_entries():
     return ok(data={"entry1": e1.to_dict(), "entry2": e2.to_dict()})
 
 
+@timetable_bp.get("/entries/<entry_id>")
+@service_or_jwt_required()
+def get_entry(entry_id):
+    from app.models.domain import TimetableEntry
+
+    entry = TimetableEntry.query.get(entry_id)
+    if not entry:
+        return fail("Timetable entry not found.", status=404)
+
+    denied = _check_timetable_access(entry.timetable)
+    if denied:
+        return denied
+
+    data = entry.to_dict()
+    data["timetable_id"] = entry.timetable_id
+    data["student_group_id"] = entry.student_group_id
+    return ok(data=data)
+
+
 @timetable_bp.patch("/entries/<entry_id>")
 @service_or_jwt_required("admin", "timetable_officer")
 def move_entry(entry_id):

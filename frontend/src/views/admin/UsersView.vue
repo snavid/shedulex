@@ -1,8 +1,10 @@
 <script setup>
-import { onMounted, ref, computed } from "vue"
-import { usersApi, getErrorMessage, validatePhone, isInvalidStoredPhone } from "@/api/client"
+import { onMounted, ref, computed, watch } from "vue"
+import { usersApi, resourcesApi, getErrorMessage, validatePhone, isInvalidStoredPhone } from "@/api/client"
+import { useAuthStore } from "@/stores/auth"
 import { useToast } from "vue-toastification"
 
+const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(true)
 const users = ref([])
@@ -12,6 +14,29 @@ const activeTab = ref("all")  // "all" | "pending"
 const showContactModal = ref(false)
 const contactSaving = ref(false)
 const contactForm = ref({ userId: "", name: "", email: "", phone: "", phoneInvalidHint: "" })
+
+const showAddStudentModal = ref(false)
+const addingStudent = ref(false)
+const departments = ref([])
+const programs = ref([])
+const studentGroups = ref([])
+const universityCode = ref("")
+const studentForm = ref({
+  first_name: "",
+  last_name: "",
+  registration_number: "",
+  phone: "",
+  email: "",
+  department_id: "",
+  program_id: "",
+  student_group_id: "",
+})
+
+const portalLink = computed(() => {
+  if (!universityCode.value) return ""
+  const base = window.location.origin
+  return `${base}/p/${universityCode.value.toLowerCase()}`
+})
 
 const pendingCount = computed(() => pendingUsers.value.length)
 
@@ -26,10 +51,116 @@ async function loadData() {
     users.value = (usersRes.data.data || []).filter(u => u.is_approved)
     pendingUsers.value = pendingRes.data.data || []
     roles.value = rolesRes.data.data || []
+    await loadUniversityCode()
   } catch (e) {
     toast.error(getErrorMessage(e, "Failed to load users."))
   } finally {
     loading.value = false
+  }
+}
+
+async function loadUniversityCode() {
+  const uniId = auth.user?.university_id
+  if (!uniId) return
+  try {
+    const { data } = await resourcesApi.universities()
+    const uni = (data.data || []).find((u) => u.id === uniId)
+    universityCode.value = uni?.code || ""
+  } catch {}
+}
+
+watch(() => studentForm.value.department_id, async (deptId) => {
+  programs.value = []
+  studentGroups.value = []
+  studentForm.value.program_id = ""
+  studentForm.value.student_group_id = ""
+  if (!deptId) return
+  try {
+    const { data } = await resourcesApi.programs({ department_id: deptId })
+    programs.value = data.data || []
+  } catch {}
+})
+
+watch(() => studentForm.value.program_id, async (progId) => {
+  studentGroups.value = []
+  studentForm.value.student_group_id = ""
+  if (!progId) return
+  try {
+    const { data } = await resourcesApi.studentGroups({ program_id: progId })
+    studentGroups.value = data.data || []
+  } catch {}
+})
+
+function openAddStudentModal() {
+  studentForm.value = {
+    first_name: "",
+    last_name: "",
+    registration_number: "",
+    phone: "",
+    email: "",
+    department_id: "",
+    program_id: "",
+    student_group_id: "",
+  }
+  showAddStudentModal.value = true
+  if (auth.user?.university_id && !departments.value.length) {
+    resourcesApi.departments({ university_id: auth.user.university_id })
+      .then(({ data }) => { departments.value = data.data || [] })
+      .catch(() => {})
+  }
+}
+
+function closeAddStudentModal() {
+  showAddStudentModal.value = false
+}
+
+async function submitStudent() {
+  const f = studentForm.value
+  if (!f.first_name || !f.last_name || !f.registration_number || !f.phone) {
+    toast.error("Name, registration number, and phone are required.")
+    return
+  }
+  if (!f.department_id || !f.program_id || !f.student_group_id) {
+    toast.error("Select department, program, and student group.")
+    return
+  }
+  const phoneError = validatePhone(f.phone)
+  if (phoneError) {
+    toast.error(phoneError)
+    return
+  }
+  addingStudent.value = true
+  try {
+    await usersApi.createStudent({
+      first_name: f.first_name.trim(),
+      last_name: f.last_name.trim(),
+      registration_number: f.registration_number.trim(),
+      phone: f.phone.trim(),
+      email: f.email?.trim() || undefined,
+      department_id: f.department_id,
+      program_id: f.program_id,
+      student_group_id: f.student_group_id,
+    })
+    toast.success("Student enrolled. Share the portal link so they can sign in.")
+    closeAddStudentModal()
+    await loadData()
+  } catch (e) {
+    toast.error(getErrorMessage(e, "Failed to add student."))
+  } finally {
+    addingStudent.value = false
+  }
+}
+
+async function copyPortalLink() {
+  if (!portalLink.value) {
+    toast.error("University code not available.")
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(portalLink.value)
+    toast.success("Portal link copied.")
+  } catch {
+    toast.info(portalLink.value)
   }
 }
 
@@ -137,11 +268,24 @@ onMounted(loadData)
 
 <template>
   <div class="space-y-6">
-    <div class="flex items-start justify-between">
+    <div class="flex items-start justify-between gap-4 flex-wrap">
       <div>
         <h1 class="text-2xl font-bold text-gray-900">User Administration</h1>
         <p class="text-sm text-gray-500 mt-1">Manage accounts, approve registrations, and assign roles.</p>
       </div>
+      <button class="btn-primary text-sm" @click="openAddStudentModal">Add Student</button>
+    </div>
+
+    <!-- Portal link card -->
+    <div v-if="portalLink" class="card bg-blue-50 border-blue-100 flex flex-col sm:flex-row sm:items-center gap-4">
+      <div class="flex-1 min-w-0">
+        <h2 class="font-semibold text-gray-900">Student Portal Link</h2>
+        <p class="text-sm text-gray-600 mt-1">
+          Share this link with students. They sign in with registration number + last 4 phone digits.
+        </p>
+        <code class="text-sm text-blue-800 break-all">{{ portalLink }}</code>
+      </div>
+      <button class="btn-secondary text-sm flex-shrink-0" @click="copyPortalLink">Copy link</button>
     </div>
 
     <!-- Tabs -->
@@ -307,6 +451,69 @@ onMounted(loadData)
           <button class="btn-secondary" :disabled="contactSaving" @click="closeContactModal">Cancel</button>
           <button class="btn-primary" :disabled="contactSaving" @click="saveContact">
             {{ contactSaving ? "Saving..." : "Save" }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add student modal -->
+    <div
+      v-if="showAddStudentModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      @click.self="closeAddStudentModal"
+    >
+      <div class="card w-full max-w-lg max-h-[90vh] overflow-y-auto space-y-4">
+        <div>
+          <h2 class="text-lg font-semibold text-gray-900">Add Student</h2>
+          <p class="text-sm text-gray-500 mt-1">Enroll a student for portal access and class notifications.</p>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="label">First name</label>
+            <input v-model="studentForm.first_name" class="input" />
+          </div>
+          <div>
+            <label class="label">Last name</label>
+            <input v-model="studentForm.last_name" class="input" />
+          </div>
+        </div>
+        <div>
+          <label class="label">Registration number</label>
+          <input v-model="studentForm.registration_number" class="input" placeholder="REG2026001" />
+        </div>
+        <div>
+          <label class="label">Phone *</label>
+          <input v-model="studentForm.phone" class="input" placeholder="+255749300606" />
+        </div>
+        <div>
+          <label class="label">Email (optional)</label>
+          <input v-model="studentForm.email" type="email" class="input" />
+        </div>
+        <div>
+          <label class="label">Department</label>
+          <select v-model="studentForm.department_id" class="input">
+            <option value="">Select department…</option>
+            <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="label">Program</label>
+          <select v-model="studentForm.program_id" class="input" :disabled="!studentForm.department_id">
+            <option value="">Select program…</option>
+            <option v-for="p in programs" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="label">Student group</label>
+          <select v-model="studentForm.student_group_id" class="input" :disabled="!studentForm.program_id">
+            <option value="">Select group…</option>
+            <option v-for="g in studentGroups" :key="g.id" :value="g.id">{{ g.name }}</option>
+          </select>
+        </div>
+        <div class="flex justify-end gap-2">
+          <button class="btn-secondary" :disabled="addingStudent" @click="closeAddStudentModal">Cancel</button>
+          <button class="btn-primary" :disabled="addingStudent" @click="submitStudent">
+            {{ addingStudent ? "Saving…" : "Add Student" }}
           </button>
         </div>
       </div>

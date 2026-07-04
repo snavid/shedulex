@@ -176,7 +176,12 @@ const navItems = computed(() => {
   if (auth.isAdmin) base.push(
     { section: "Administration" },
     { to: "/admin/users",  label: "Users",       icon: "users" },
+    { to: "/admin/comments", label: "Comments",  icon: "notifications" },
     { to: "/admin/audit",  label: "Audit Logs",  icon: "audit" },
+  )
+  else if (auth.userRole === "timetable_officer") base.push(
+    { section: "Administration" },
+    { to: "/admin/comments", label: "Comments", icon: "notifications" },
   )
   const userRole = auth.userRole
   return base.filter((item) => !item.roles || item.roles.includes(userRole))

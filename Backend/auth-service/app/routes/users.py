@@ -3,13 +3,14 @@ from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from marshmallow import ValidationError
 from app.extensions import db
 from app.models.user import User, Role, UserSession
-from app.schemas import UserUpdateSchema
+from app.schemas import UserUpdateSchema, StudentCreateSchema
 from app.middleware.rbac import roles_required
 from app.services import auth_service
 
 users_bp = Blueprint("users", __name__, url_prefix="/api/v1/users")
 
 update_schema = UserUpdateSchema()
+student_schema = StudentCreateSchema()
 
 
 @users_bp.get("/")
@@ -216,6 +217,34 @@ def create_lecturer():
     response_data = user.to_dict()
     response_data["default_password"] = plain_password  # visible to admin only at creation time
     return jsonify({"success": True, "data": response_data, "message": "Lecturer account created. Credentials emailed."}), 201
+
+
+@users_bp.post("/students")
+@jwt_required()
+@roles_required("admin")
+def create_student():
+    claims = get_jwt()
+    uni_id = claims.get("university_id")
+    if not uni_id:
+        return jsonify({"success": False, "message": "University scope is required."}), 422
+
+    try:
+        data = student_schema.load(request.get_json() or {})
+    except ValidationError as e:
+        return jsonify({"success": False, "message": "Validation failed", "errors": e.messages}), 422
+
+    try:
+        user, _plain_password = auth_service.create_student_account(data, uni_id)
+    except ValueError as e:
+        return jsonify({"success": False, "message": str(e)}), 409
+    except RuntimeError as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+    return jsonify({
+        "success": True,
+        "data": user.to_dict(),
+        "message": "Student enrolled. They can access the portal with their registration number and phone last 4 digits.",
+    }), 201
 
 
 @users_bp.post("/<user_id>/resend-credentials")

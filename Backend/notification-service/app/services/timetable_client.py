@@ -39,3 +39,18 @@ def get_timetable_entries(timetable_id: str) -> list[dict]:
     if not timetable:
         return []
     return timetable.get("entries") or []
+
+
+def get_timetable_entry(entry_id: str) -> dict | None:
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.get(
+                f"{_base_url()}/api/v1/timetable/entries/{entry_id}",
+                headers=_headers(),
+            )
+            if resp.status_code != 200:
+                return None
+            return resp.json().get("data")
+    except Exception as exc:
+        current_app.logger.error("Failed to fetch timetable entry %s: %s", entry_id, exc)
+        return None

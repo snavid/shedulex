@@ -21,6 +21,9 @@ class Role(db.Model):
 
 class User(db.Model):
     __tablename__ = "users"
+    __table_args__ = (
+        db.UniqueConstraint("university_id", "registration_number", name="uq_user_uni_reg_number"),
+    )
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
@@ -34,6 +37,7 @@ class User(db.Model):
     program_id = db.Column(db.String(36))  # soft-ref to timetable programs.id
     student_group_id = db.Column(db.String(36))  # soft-ref to timetable student_groups.id
     staff_id = db.Column(db.String(50), unique=True)
+    registration_number = db.Column(db.String(50), index=True)
     university_id = db.Column(db.String(36))  # soft-ref to timetable-service university
     role_id = db.Column(db.String(36), db.ForeignKey("roles.id"), nullable=False)
     is_active = db.Column(db.Boolean, default=True)
@@ -73,6 +77,7 @@ class User(db.Model):
             "program_id": self.program_id,
             "student_group_id": self.student_group_id,
             "staff_id": self.staff_id,
+            "registration_number": self.registration_number,
             "university_id": self.university_id,
             "role": self.role.to_dict() if self.role else None,
             "is_active": self.is_active,

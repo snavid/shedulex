@@ -92,6 +92,39 @@ class UserUpdateSchema(Schema):
     department_id = fields.Str(allow_none=True)
     program_id = fields.Str(allow_none=True)
     student_group_id = fields.Str(allow_none=True)
+    registration_number = fields.Str(validate=validate.Length(max=50), allow_none=True)
+
+    @validates("phone")
+    def validate_phone(self, value):
+        if value and "@" in value:
+            raise ValidationError("Phone number cannot contain '@'.")
+
+
+class StudentCreateSchema(Schema):
+    first_name = fields.Str(required=True, validate=validate.Length(min=1, max=100))
+    last_name = fields.Str(required=True, validate=validate.Length(min=1, max=100))
+    registration_number = fields.Str(required=True, validate=validate.Length(min=2, max=50))
+    phone = fields.Str(required=True, validate=validate.Length(min=10, max=25))
+    email = fields.Email(allow_none=True)
+    department_id = fields.Str(required=True)
+    program_id = fields.Str(required=True)
+    student_group_id = fields.Str(required=True)
+
+    @validates("phone")
+    def validate_phone(self, value):
+        if value and "@" in value:
+            raise ValidationError("Phone number cannot contain '@'.")
+
+
+class PortalSessionSchema(Schema):
+    university_code = fields.Str(required=True, validate=validate.Length(min=1, max=20))
+    registration_number = fields.Str(required=True, validate=validate.Length(min=2, max=50))
+    phone_last4 = fields.Str(required=True, validate=validate.Length(equal=4))
+
+
+class PortalSubscribeSchema(Schema):
+    phone = fields.Str(validate=validate.Length(min=10, max=25), allow_none=True)
+    email = fields.Email(allow_none=True)
 
     @validates("phone")
     def validate_phone(self, value):

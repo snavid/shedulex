@@ -10,6 +10,7 @@ const router = createRouter({
     { path: "/verify-email", name: "verify-email", component: () => import("@/views/auth/VerifyEmailView.vue"), meta: { guest: true } },
     { path: "/reset-password", name: "reset-password", component: () => import("@/views/auth/ResetPasswordView.vue"), meta: { guest: true } },
     { path: "/forgot-password", name: "forgot-password", component: () => import("@/views/auth/ForgotPasswordView.vue"), meta: { guest: true } },
+    { path: "/p/:uniCode", name: "student-portal", component: () => import("@/views/portal/StudentPortalView.vue"), meta: { guest: true } },
 
     // Protected routes (inside app shell)
     {
@@ -42,6 +43,7 @@ const router = createRouter({
         { path: "analytics", name: "analytics", component: () => import("@/views/AnalyticsView.vue") },
         { path: "notifications", name: "notifications", component: () => import("@/views/NotificationsView.vue"), meta: { roles: ["admin", "timetable_officer"] } },
         { path: "admin/users", name: "admin-users", component: () => import("@/views/admin/UsersView.vue"), meta: { roles: ["admin"] } },
+        { path: "admin/comments", name: "admin-comments", component: () => import("@/views/admin/CommentsView.vue"), meta: { roles: ["admin", "timetable_officer"] } },
         { path: "admin/audit", name: "admin-audit", component: () => import("@/views/admin/AuditView.vue"), meta: { roles: ["admin"] } },
         { path: "profile", name: "profile", component: () => import("@/views/ProfileView.vue") },
       ],
@@ -59,7 +61,9 @@ router.beforeEach(async (to, from, next) => {
   }
 
   if (to.meta.guest && auth.isAuthenticated) {
-    return next({ name: "dashboard" })
+    if (to.name !== "student-portal") {
+      return next({ name: "dashboard" })
+    }
   }
 
   if (auth.isAuthenticated && !auth.user) {

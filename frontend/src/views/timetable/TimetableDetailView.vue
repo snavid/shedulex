@@ -44,8 +44,12 @@ const filterLecturer = ref("")
 // Session modal
 const selectedEntry = ref(null)
 const showSessionModal = ref(false)
-const reminderForm = ref({ hours_before: 2, channel: "both", scheduled_at: "" })
+const reminderForm = ref({ subject: "", message: "", channel: "sms" })
 const sendingReminder = ref(false)
+
+const canAnnounceToClass = computed(() =>
+  ["lecturer", "admin", "timetable_officer", "hod"].includes(auth.user?.role?.name)
+)
 
 const exportOps = ref({ pdf: false, excel: false, csv: false, bundle: false, share: false })
 const templateBlocks = ref([])
@@ -307,7 +311,11 @@ const monthDaySummaries = computed(() =>
 // Session modal
 function openSession(entry) {
   selectedEntry.value = entry
-  reminderForm.value = { hours_before: 2, channel: "both", scheduled_at: "" }
+  reminderForm.value = {
+    subject: entry.course?.name || "Class Announcement",
+    message: "",
+    channel: "sms",
+  }
   showSessionModal.value = true
 }
 
@@ -316,28 +324,26 @@ function closeModal() {
   selectedEntry.value = null
 }
 
-async function sendReminder() {
+async function announceToClass() {
   if (!selectedEntry.value) return
+  if (!reminderForm.value.message?.trim()) {
+    toast.error("Please enter a message for your class.")
+    return
+  }
   sendingReminder.value = true
   try {
     const entry = selectedEntry.value
-    const classTime = entry.time_slot
-      ? `${entry.time_slot.day} ${entry.time_slot.start_time}`
-      : "class"
-
-    await notificationApi.send({
-      recipient_id: entry.lecturer?.user_id,
-      email: entry.lecturer?.email,
-      phone: entry.lecturer?.phone || auth.user?.phone,
+    const { data } = await notificationApi.classAnnounce({
+      entry_id: entry.id,
+      subject: reminderForm.value.subject || entry.course?.name,
+      message: reminderForm.value.message.trim(),
       channel: reminderForm.value.channel,
-      type: "reminder",
-      subject: `Reminder: ${entry.course?.name}`,
-      body: `You have ${entry.course?.name} at ${classTime} in ${entry.room?.name || "TBD"}.`,
     })
-    toast.success("Reminder scheduled.")
+    const groupName = entry.student_group?.name || "class"
+    toast.success(data.message || `Announcement queued for ${groupName} students.`)
     closeModal()
   } catch (e) {
-    toast.error(getErrorMessage(e, "Failed to send reminder."))
+    toast.error(getErrorMessage(e, "Failed to queue announcement."))
   } finally {
     sendingReminder.value = false
   }
@@ -1045,30 +1051,42 @@ async function doDelete() {
               </div>
             </div>
 
-            <!-- Reminder section (lecturers and admins only) -->
-            <div v-if="auth.user?.role?.name === 'lecturer' || auth.user?.role?.name === 'admin' || auth.user?.role?.name === 'timetable_officer'" class="border-t border-gray-200 pt-4">
-              <h3 class="font-semibold text-gray-900 mb-3">Send Class Reminder</h3>
+            <!-- Announce to Class (staff only) -->
+            <div v-if="canAnnounceToClass" class="border-t border-gray-200 pt-4">
+              <h3 class="font-semibold text-gray-900 mb-3">Announce to Class</h3>
               <div class="space-y-3">
+                <div>
+                  <label class="label text-xs">Subject</label>
+                  <input v-model="reminderForm.subject" type="text" class="input text-sm" :placeholder="selectedEntry.course?.name || 'Class Announcement'" />
+                </div>
+                <div>
+                  <label class="label text-xs">Message</label>
+                  <textarea
+                    v-model="reminderForm.message"
+                    rows="3"
+                    class="input text-sm resize-none"
+                    placeholder="Come with your assignment…"
+                  />
+                </div>
                 <div>
                   <label class="label text-xs">Notification Channel</label>
                   <select v-model="reminderForm.channel" class="input text-sm">
-                    <option value="email">Email</option>
                     <option value="sms">SMS</option>
+                    <option value="email">Email</option>
                     <option value="both">Email + SMS</option>
                   </select>
-                </div>
-                <div>
-                  <label class="label text-xs">Schedule for (optional — leave blank to send now)</label>
-                  <input v-model="reminderForm.scheduled_at" type="datetime-local" class="input text-sm" />
                 </div>
               </div>
               <button
                 class="btn-primary w-full mt-3"
-                :disabled="sendingReminder"
-                @click="sendReminder"
+                :disabled="sendingReminder || !selectedEntry.student_group"
+                @click="announceToClass"
               >
-                {{ sendingReminder ? "Sending…" : "Send Reminder" }}
+                {{ sendingReminder ? "Queuing…" : "Announce to Class" }}
               </button>
+              <p v-if="!selectedEntry.student_group" class="text-xs text-amber-600 mt-2">
+                This session has no student group assigned.
+              </p>
             </div>
           </div>
         </div>

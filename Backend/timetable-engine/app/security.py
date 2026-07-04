@@ -22,6 +22,25 @@ def get_jwt_university_id() -> str | None:
         return None
 
 
+def portal_jwt_required(fn):
+    """Require a valid portal JWT (portal=true claim)."""
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if is_internal_request():
+            return fn(*args, **kwargs)
+        try:
+            verify_jwt_in_request()
+        except Exception:
+            return jsonify({"success": False, "message": "Authorization token required."}), 401
+        claims = get_jwt()
+        if not claims.get("portal"):
+            return jsonify({"success": False, "message": "Portal access token required."}), 403
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
 def service_or_jwt_required(*roles):
     """Allow either trusted internal service key or a valid JWT."""
 

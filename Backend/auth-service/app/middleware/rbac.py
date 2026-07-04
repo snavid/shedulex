@@ -10,6 +10,8 @@ def roles_required(*roles):
         def wrapper(*args, **kwargs):
             verify_jwt_in_request()
             claims = get_jwt()
+            if claims.get("portal"):
+                return jsonify({"success": False, "message": "Portal tokens cannot access this resource."}), 403
             user_role = claims.get("role", "")
             if user_role not in roles:
                 return jsonify({"success": False, "message": "Insufficient permissions."}), 403

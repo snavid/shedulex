@@ -279,6 +279,7 @@ def resolve_broadcast_audience(
     university_id: str | None = None,
     department_id: str | None = None,
     program_id: str | None = None,
+    student_group_id: str | None = None,
 ) -> list[dict]:
     """Resolve recipients for manual broadcast by audience role."""
     recipients: dict[str, dict] = {}
@@ -298,6 +299,8 @@ def resolve_broadcast_audience(
         base_filters["department_id"] = department_id
     if program_id:
         base_filters["program_id"] = program_id
+    if student_group_id:
+        base_filters["student_group_id"] = student_group_id
 
     roles = []
     if audience == "students":

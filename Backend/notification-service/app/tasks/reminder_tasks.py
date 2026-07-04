@@ -103,6 +103,7 @@ def broadcast_announcement(
     university_id: str | None = None,
     department_id: str | None = None,
     program_id: str | None = None,
+    student_group_id: str | None = None,
     recipient_ids: list[str] | None = None,
 ):
     from app.services.recipient_resolver import fetch_user_by_id, resolve_broadcast_audience
@@ -121,6 +122,7 @@ def broadcast_announcement(
                 university_id=university_id,
                 department_id=department_id,
                 program_id=program_id,
+                student_group_id=student_group_id,
             )
 
         sent_count = 0

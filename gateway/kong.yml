@@ -1,8 +1,8 @@
 _format_version: "3.0"
 _transform: true
 
-# Upstreams use Docker DNS hostnames so Kong re-resolves after container recreate
-# (avoids stale IPs and "invalid response" / connection refused through the proxy).
+# Upstreams use Docker DNS hostnames so Kong re-resolves after container recreate.
+# After rebuilding a backend service, run: docker compose restart kong
 upstreams:
   - name: auth-upstream
     targets:
@@ -56,6 +56,42 @@ services:
           minute: 60
           policy: local
 
+  - name: auth-portal-public
+    protocol: http
+    host: auth-upstream
+    port: 80
+    routes:
+      - name: portal-session
+        paths:
+          - /api/v1/portal/session
+        methods:
+          - POST
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 20
+          policy: local
+
+  # auth-portal-subscribe uses JWT — attach plugin on a dedicated service
+  - name: auth-portal-protected
+    protocol: http
+    host: auth-upstream
+    port: 80
+    routes:
+      - name: portal-subscribe-jwt
+        paths:
+          - /api/v1/portal/subscribe
+        strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+      - name: rate-limiting
+        config:
+          minute: 60
+          policy: local
+
   # Public timetable routes (no JWT) — used during registration before user has a token
   - name: timetable-public
     protocol: http
@@ -73,6 +109,39 @@ services:
         config:
           minute: 30
           policy: local
+
+  - name: timetable-portal
+    protocol: http
+    host: timetable-upstream
+    port: 80
+    routes:
+      - name: portal-timetable-comments
+        paths:
+          - /api/v1/portal/timetable
+          - /api/v1/portal/comments
+        strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+      - name: rate-limiting
+        config:
+          minute: 60
+          policy: local
+
+  - name: timetable-admin-comments
+    protocol: http
+    host: timetable-upstream
+    port: 80
+    routes:
+      - name: admin-comments-routes
+        paths:
+          - /api/v1/admin/comments
+        strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
 
   - name: timetable-service
     protocol: http

@@ -3,11 +3,12 @@ import secrets
 import string
 import json
 import os
+import re
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
 from flask import request, current_app
-from flask_jwt_extended import decode_token
+from flask_jwt_extended import decode_token, create_access_token
 from app.extensions import db
 from app.models.user import User, Role, UserSession
 from app.services.token_service import generate_tokens, blacklist_token, blacklist_all_user_tokens
@@ -309,6 +310,145 @@ def create_lecturer_account(data: dict) -> tuple[User, str]:
         current_app.logger.warning("Credential email failed to send for %s", email)
 
     return user, plain_password
+
+
+def _phone_matches_last4(phone: str | None, last4: str) -> bool:
+    if not phone or not last4:
+        return False
+    digits = re.sub(r"\D", "", phone)
+    return digits.endswith(last4)
+
+
+def _resolve_university_by_code(university_code: str) -> dict | None:
+    """Find university record from timetable-engine by code."""
+    code = university_code.strip().upper()
+    list_req = urllib.request.Request(f"{TIMETABLE_URL}/api/v1/universities")
+    try:
+        with urllib.request.urlopen(list_req, timeout=10) as resp:
+            unis = json.loads(resp.read()).get("data") or []
+            return next((u for u in unis if (u.get("code") or "").upper() == code), None)
+    except Exception:
+        current_app.logger.warning("Could not resolve university code %s.", university_code)
+        return None
+
+
+def create_student_account(data: dict, university_id: str) -> tuple[User, str]:
+    """Create a student account for admin enrollment."""
+    role = Role.query.filter_by(name="student").first()
+    if not role:
+        raise RuntimeError("Student role not found. Ensure roles are seeded.")
+
+    reg_number = data["registration_number"].strip()
+    phone = data.get("phone")
+    if not phone:
+        raise ValueError("Phone number is required for student accounts.")
+
+    existing_reg = User.query.filter_by(
+        university_id=university_id,
+        registration_number=reg_number,
+    ).first()
+    if existing_reg:
+        raise ValueError(f"A student with registration number '{reg_number}' already exists.")
+
+    uni = _resolve_university_by_code(data.get("university_code") or "")
+    uni_code = (uni or {}).get("code") or "student"
+    email = (data.get("email") or "").strip().lower() or f"{reg_number.lower()}@{uni_code.lower()}.student.shedulex"
+
+    if User.query.filter_by(email=email).first():
+        raise ValueError(f"A user with email '{email}' already exists.")
+
+    username = reg_number.replace(" ", "").lower()
+    if User.query.filter_by(username=username).first():
+        username = f"{username}.{secrets.token_hex(3)}"
+
+    department_name = _resolve_department_name(data["department_id"])
+    plain_password = _generate_password()
+
+    user = User(
+        email=email,
+        username=username,
+        first_name=data["first_name"],
+        last_name=data["last_name"],
+        phone=phone,
+        department=department_name,
+        department_id=data["department_id"],
+        program_id=data["program_id"],
+        student_group_id=data["student_group_id"],
+        registration_number=reg_number,
+        university_id=university_id,
+        role_id=role.id,
+        is_active=True,
+        is_approved=True,
+        is_verified=True,
+        must_change_password=False,
+    )
+    user.set_password(plain_password)
+    db.session.add(user)
+    db.session.commit()
+    return user, plain_password
+
+
+def create_portal_session(university_code: str, registration_number: str, phone_last4: str) -> dict:
+    """Authenticate a student via reg number + phone last 4 and return a portal JWT."""
+    uni = _resolve_university_by_code(university_code)
+    if not uni:
+        raise ValueError("University not found.")
+
+    role = Role.query.filter_by(name="student").first()
+    if not role:
+        raise RuntimeError("Student role not found.")
+
+    reg = registration_number.strip()
+    user = User.query.filter_by(
+        university_id=uni["id"],
+        registration_number=reg,
+        role_id=role.id,
+        is_active=True,
+        is_approved=True,
+    ).first()
+    if not user or not _phone_matches_last4(user.phone, phone_last4):
+        raise ValueError("Invalid registration number or phone digits.")
+
+    access_token = create_access_token(
+        identity=str(user.id),
+        additional_claims={
+            "role": "student",
+            "portal": True,
+            "registration_number": user.registration_number,
+            "student_group_id": user.student_group_id,
+            "program_id": user.program_id,
+            "university_id": str(user.university_id) if user.university_id else None,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+        },
+        expires_delta=timedelta(hours=24),
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "Bearer",
+        "expires_in": 86400,
+        "user": {
+            "id": user.id,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "registration_number": user.registration_number,
+            "phone": user.phone,
+            "email": user.email,
+            "student_group_id": user.student_group_id,
+            "program_id": user.program_id,
+            "university_id": user.university_id,
+        },
+    }
+
+
+def update_portal_subscription(user: User, data: dict) -> User:
+    """Update phone/email for portal notification opt-in."""
+    if data.get("phone"):
+        user.phone = data["phone"]
+    if data.get("email"):
+        user.email = data["email"].lower()
+    db.session.commit()
+    return user
 
 
 def resend_credentials(user_id: str) -> tuple[User, str]:
