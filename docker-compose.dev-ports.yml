@@ -1,0 +1,15 @@
+# Optional override: publish Postgres and Redis to the host for local debugging
+# (DBeaver, running a backend service outside Docker, etc.).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev-ports.yml up -d
+#
+# Default `docker compose up` keeps these internal-only; only Kong (8000/8001) is exposed.
+
+services:
+  postgres:
+    ports:
+      - "5543:5432"
+  redis:
+    ports:
+      - "6490:6379"

@@ -35,8 +35,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init_databases.sql:/docker-entrypoint-initdb.d/init_databases.sql
-    ports:
-      - "5543:5432"
     networks:
       - shedulex-net
     healthcheck:
@@ -52,8 +50,6 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-    ports:
-      - "6490:6379"
     networks:
       - shedulex-net
     healthcheck:
@@ -139,8 +135,6 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${AUTH_DB:-auth_db}
       REDIS_URL: redis://redis:6379/0
       AUDIT_SERVICE_URL: http://audit-service:5008
-    ports:
-      - "5001:5001"
     restart: unless-stopped
     networks:
       - shedulex-net
@@ -168,8 +162,6 @@ services:
       CALENDAR_SERVICE_URL: http://calendar-service:5005
       TIMETABLE_NOTIFY_ENABLED: ${TIMETABLE_NOTIFY_ENABLED:-true}
       AUDIT_SERVICE_URL: http://audit-service:5008
-    ports:
-      - "5002:5002"
     networks:
       - shedulex-net
     restart: unless-stopped
@@ -194,8 +186,6 @@ services:
       ANONYMIZED_TELEMETRY: "FALSE"
     volumes:
       - chroma_data:/chroma/chroma
-    ports:
-      - "8010:8000"
     networks:
       - shedulex-net
     restart: unless-stopped
@@ -219,8 +209,6 @@ services:
       TIMETABLE_SERVICE_URL: http://timetable-engine:5002
       CHROMA_HOST: chromadb
       CHROMA_PORT: "8000"
-    ports:
-      - "5003:5003"
     networks:
       - shedulex-net
     depends_on:
@@ -254,8 +242,6 @@ services:
       DEFAULT_SMS_PHONE: ${DEFAULT_SMS_PHONE:-+255749300606}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-jwt-secret-change-me}
       JWT_ISSUER: ${JWT_ISSUER:-shedulex}
-    ports:
-      - "5004:5004"
     restart: unless-stopped
     networks:
       - shedulex-net
@@ -342,8 +328,6 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${CALENDAR_DB:-calendar_db}
       REDIS_URL: redis://redis:6379/0
       NOTIFICATION_SERVICE_URL: http://notification-service:5004
-    ports:
-      - "5005:5005"
     networks:
       - shedulex-net
     depends_on:
@@ -365,8 +349,6 @@ services:
       EXPORT_SHARE_TOKEN_MAX_HOURS: ${EXPORT_SHARE_TOKEN_MAX_HOURS:-168}
       DOCUMENT_SHARE_SECRET: ${DOCUMENT_SHARE_SECRET:-}
       DOCUMENT_SHARE_SALT: ${DOCUMENT_SHARE_SALT:-shedulex-document-share}
-    ports:
-      - "5006:5006"
     networks:
       - shedulex-net
     depends_on:
@@ -383,8 +365,6 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${ANALYTICS_DB:-analytics_db}
       REDIS_URL: redis://redis:6379/0
       TIMETABLE_SERVICE_URL: http://timetable-engine:5002
-    ports:
-      - "5007:5007"
     networks:
       - shedulex-net
     depends_on:
@@ -401,8 +381,6 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shedulex}:${POSTGRES_PASSWORD:-shedulex_secret}@postgres:5432/${AUDIT_DB:-audit_db}
       REDIS_URL: redis://redis:6379/0
       AUTH_SERVICE_URL: http://auth-service:5001
-    ports:
-      - "5008:5008"
     networks:
       - shedulex-net
     depends_on:

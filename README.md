@@ -69,6 +69,18 @@ This repository now includes:
    - Kong gateway: `http://localhost:8000`
    - Kong admin: `http://localhost:8001`
 
+## Networking
+
+By default, **only Kong** is published to the host (`8000` proxy, `8001` admin). All microservices, Postgres, Redis, and ChromaDB communicate on the internal `shedulex-net` Docker network. The frontend dev server proxies `/api` to Kong at `http://localhost:8000`.
+
+To expose Postgres/Redis on the host for DBeaver or running a backend outside Docker:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev-ports.yml up -d
+```
+
+This publishes `localhost:5543` (Postgres) and `localhost:6490` (Redis) without exposing individual microservice ports.
+
 ## Frontend Local Dev
 
 ```bash
