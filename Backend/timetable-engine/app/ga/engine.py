@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from functools import partial
 
-from app.ga.chromosome import Chromosome
+from app.ga.constraint_index import ConstraintIndex
 from app.ga.population import initialize_population
 from app.ga.fitness import evaluate, violation_report
 from app.ga.operators import (
@@ -75,6 +75,8 @@ def run_ga(
     config: GAConfig | None = None,
     db_constraints: list[dict] | None = None,
     external_bookings: dict | None = None,
+    generating_department_id: str | None = None,
+    constraint_index: ConstraintIndex | None = None,
     progress_callback=None,
 ) -> GAResult:
     """
@@ -87,6 +89,8 @@ def run_ga(
         lecturers:         dict[lecturer_id → lecturer dict]
         config:            GAConfig (uses defaults if None)
         db_constraints:    list of active Constraint dicts from the database
+        generating_department_id: department UUID for the timetable being generated
+        constraint_index:  pre-built ConstraintIndex (built from db_constraints if omitted)
         progress_callback: optional callable(generation, best_fitness)
     Returns:
         GAResult with best chromosome, statistics, and violation report
@@ -103,6 +107,8 @@ def run_ga(
         and not s.get("is_break", False)
     ] or slots  # fall back to all slots if nothing qualifies
 
+    idx = constraint_index or ConstraintIndex(db_constraints or [])
+
     ctx = {
         "courses": {c["id"]: c for c in courses},
         "rooms": {r["id"]: r for r in rooms},
@@ -110,6 +116,8 @@ def run_ga(
         "lecturers": lecturers,
         "db_constraints": db_constraints or [],
         "external_bookings": external_bookings or {"room": {}, "lecturer": {}},
+        "generating_department_id": generating_department_id or "",
+        "constraint_index": idx,
     }
 
     room_ids = [r["id"] for r in rooms]
@@ -119,8 +127,12 @@ def run_ga(
     start = time.perf_counter()
 
     # Step 1 – Smart population initialisation
-    population = initialize_population(cfg.population_size, courses, rooms, slots, lecturers,
-                                       external_bookings=ctx["external_bookings"])
+    population = initialize_population(
+        cfg.population_size, courses, rooms, slots, lecturers,
+        external_bookings=ctx["external_bookings"],
+        generating_department_id=generating_department_id,
+        constraint_index=idx,
+    )
 
     # Step 2 – Initial parallel fitness evaluation
     _parallel_evaluate(population, ctx, _EVAL_WORKERS)
@@ -162,8 +174,18 @@ def run_ga(
             else:
                 c1, c2 = single_point_crossover(p1, p2)
 
-            c1 = mutate(c1, mutation_rate, room_ids, slot_ids, lecturers, ctx["courses"], slots_info)
-            c2 = mutate(c2, mutation_rate, room_ids, slot_ids, lecturers, ctx["courses"], slots_info)
+            c1 = mutate(
+                c1, mutation_rate, room_ids, slot_ids, lecturers, ctx["courses"], slots_info,
+                generating_department_id=generating_department_id,
+                constraint_index=idx, rooms=rooms,
+                external_bookings=ctx["external_bookings"],
+            )
+            c2 = mutate(
+                c2, mutation_rate, room_ids, slot_ids, lecturers, ctx["courses"], slots_info,
+                generating_department_id=generating_department_id,
+                constraint_index=idx, rooms=rooms,
+                external_bookings=ctx["external_bookings"],
+            )
             pending.extend([c1, c2])
 
         # Parallel evaluation of new children
@@ -193,8 +215,12 @@ def run_ga(
         if stagnation_count >= cfg.stagnation_limit:
             logger.debug("Stagnation at gen %d, injecting diversity", generation)
             inject_count = cfg.population_size // 5
-            fresh = initialize_population(inject_count, courses, rooms, slots, lecturers,
-                                          external_bookings=ctx["external_bookings"])
+            fresh = initialize_population(
+                inject_count, courses, rooms, slots, lecturers,
+                external_bookings=ctx["external_bookings"],
+                generating_department_id=generating_department_id,
+                constraint_index=idx,
+            )
             _parallel_evaluate(fresh, ctx, _EVAL_WORKERS)
             population[-inject_count:] = fresh
             stagnation_count = 0
@@ -204,6 +230,17 @@ def run_ga(
         "GA done: gen=%d, best_fitness=%.4f, time=%.2fs",
         generation, best.fitness, elapsed,
     )
+
+    courses_map = ctx["courses"]
+    gene_lecturers = {}
+    for i, gene in enumerate(best.genes):
+        course = courses_map.get(gene.course_id, {})
+        per_group = course.get("per_group_lecturer_ids") or {}
+        if gene.student_group_id and gene.student_group_id in per_group:
+            gene_lecturers[i] = per_group[gene.student_group_id]
+        else:
+            gene_lecturers[i] = course.get("lecturer_id")
+    ctx["gene_lecturers"] = gene_lecturers
 
     violations = violation_report(best, ctx)
 

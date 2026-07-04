@@ -457,6 +457,7 @@ class Timetable(db.Model):
 
     entries = db.relationship("TimetableEntry", back_populates="timetable", cascade="all, delete-orphan")
     snapshots = db.relationship("TimetableSnapshot", back_populates="timetable", cascade="all, delete-orphan")
+    comments = db.relationship("TimetableComment", back_populates="timetable", cascade="all, delete-orphan")
     department = db.relationship("Department")
     program = db.relationship("Program", back_populates="timetables")
     template = db.relationship("TimetableTemplate")
@@ -565,7 +566,7 @@ class TimetableComment(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     entry = db.relationship("TimetableEntry")
-    timetable = db.relationship("Timetable")
+    timetable = db.relationship("Timetable", back_populates="comments")
 
     def to_dict(self, include_context=False):
         d = {
@@ -592,6 +593,7 @@ class Constraint(db.Model):
     rule_type values (used by fitness.py to route evaluation):
       Lecturer: max_daily_hours | max_weekly_hours | max_consecutive | preferred_times | unavailable
       Room:     capacity_check  | equipment_required | shared_room
+                shared_room config: allowed_department_ids, priority_order, department_weights
       Student:  no_overlap      | max_consecutive    | exam_gap
       Academic: semester_only   | fixed_session      | mandatory_order
       System:   timezone_aware  | holiday_aware

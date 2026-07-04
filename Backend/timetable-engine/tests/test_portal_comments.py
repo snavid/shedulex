@@ -282,3 +282,62 @@ class TestPortalComments:
         )
         assert empty_sem2.status_code == 200
         assert empty_sem2.get_json()["data"] == []
+
+    def test_delete_timetable_with_comments(self, client, app):
+        from app.extensions import db
+        from app.models.domain import (
+            University, Department, Program, StudentGroup, Course,
+            Lecturer, Room, TimeSlot, Timetable, TimetableEntry, TimetableComment,
+        )
+
+        with app.app_context():
+            uni = University(name="Delete Uni", code="DEL")
+            db.session.add(uni)
+            db.session.flush()
+            dept = Department(name="CS Del", code="CSD", university_id=uni.id)
+            db.session.add(dept)
+            db.session.flush()
+            prog = Program(name="BCS Del", code="BCSD", department_id=dept.id)
+            db.session.add(prog)
+            db.session.flush()
+            group = StudentGroup(name="Group D", code="GAD", program_id=prog.id, year_of_study=1, semester=1)
+            lec = Lecturer(name="Dr Delete", email="del@test.com", department_id=dept.id)
+            room = Room(name="R1D", code="R1D", capacity=30, university_id=uni.id)
+            slot = TimeSlot(day="Monday", start_time="08:00", end_time="09:00")
+            db.session.add_all([group, lec, room, slot])
+            db.session.flush()
+            course = Course(name="Intro Del", code="CS101D", department_id=dept.id, program_id=prog.id, lecturer_id=lec.id)
+            tt = Timetable(name="Sem 1 Del", semester=1, academic_year="2025-2026", department_id=dept.id, status="active")
+            db.session.add_all([course, tt])
+            db.session.flush()
+            entry = TimetableEntry(
+                timetable_id=tt.id,
+                course_id=course.id,
+                lecturer_id=lec.id,
+                room_id=room.id,
+                time_slot_id=slot.id,
+                student_group_id=group.id,
+            )
+            db.session.add(entry)
+            db.session.flush()
+            db.session.add(TimetableComment(
+                entry_id=entry.id,
+                timetable_id=tt.id,
+                student_user_id="student-del",
+                registration_number="REGDEL",
+                student_name="Delete Student",
+                body="Comment on entry",
+                status="visible",
+            ))
+            db.session.commit()
+            timetable_id = tt.id
+            entry_id = entry.id
+
+        headers = {"X-Internal-Service-Key": "dev-internal-service-key"}
+        resp = client.delete(f"/api/v1/timetable/{timetable_id}", headers=headers)
+        assert resp.status_code == 200
+
+        with app.app_context():
+            assert Timetable.query.get(timetable_id) is None
+            assert TimetableEntry.query.get(entry_id) is None
+            assert TimetableComment.query.filter_by(timetable_id=timetable_id).count() == 0

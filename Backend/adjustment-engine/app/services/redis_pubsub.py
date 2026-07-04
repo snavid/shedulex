@@ -38,6 +38,32 @@ def _log_key(session_id: str) -> str:
     return f"{CHANNEL_PREFIX}{session_id}:event_log"
 
 
+def _cancel_key(session_id: str) -> str:
+    return f"{CHANNEL_PREFIX}{session_id}:cancelled"
+
+
+def request_cancel(session_id: str) -> None:
+    """Signal the background job for this session to stop cooperatively."""
+    try:
+        get_redis().set(_cancel_key(session_id), b"1", ex=LOG_TTL)
+    except Exception as exc:
+        logger.warning("Redis cancel request failed for session %s: %s", session_id, exc)
+
+
+def clear_cancel(session_id: str) -> None:
+    try:
+        get_redis().delete(_cancel_key(session_id))
+    except Exception:
+        pass
+
+
+def is_cancelled(session_id: str) -> bool:
+    try:
+        return get_redis().exists(_cancel_key(session_id)) > 0
+    except Exception:
+        return False
+
+
 def publish(session_id: str, event: dict) -> None:
     """Publish one event to the session's Redis channel + persist to event log."""
     data = json.dumps(event)

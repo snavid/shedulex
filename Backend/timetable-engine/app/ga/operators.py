@@ -3,12 +3,14 @@ Genetic operators: selection, crossover, mutation, elitism.
 
 Selection  – Tournament selection (size k=5)
 Crossover  – Single-point, uniform, and two-point strategies
-Mutation   – Guided (respects lecturer availability) + random fallback
+Mutation   – Guided (respects lecturer availability + DB constraints) + random fallback
 Elitism    – Top N chromosomes carried over unchanged
 """
 from __future__ import annotations
 import random
+from collections import defaultdict
 from app.ga.chromosome import Chromosome, Gene
+from app.ga.constraint_index import ConstraintIndex
 
 
 def tournament_selection(population: list[Chromosome], tournament_size: int = 5) -> Chromosome:
@@ -52,6 +54,20 @@ def uniform_crossover(parent1: Chromosome, parent2: Chromosome) -> tuple[Chromos
     return Chromosome(genes=c1_genes), Chromosome(genes=c2_genes)
 
 
+def _build_room_busy_slots(slots_info: dict, external_bookings: dict) -> dict[str, set[str]]:
+    wallclock_to_slot = {}
+    for s in slots_info.values():
+        day, st, en = s.get("day"), s.get("start_time"), s.get("end_time")
+        if day and st and en:
+            wallclock_to_slot[(day, st, en)] = s["id"]
+    room_busy: dict[str, set[str]] = defaultdict(set)
+    for (room_id, d, st, en) in external_bookings.get("room", {}):
+        sid = wallclock_to_slot.get((d, st, en))
+        if sid:
+            room_busy[room_id].add(sid)
+    return room_busy
+
+
 def mutate(
     chromosome: Chromosome,
     mutation_rate: float,
@@ -60,55 +76,101 @@ def mutate(
     lecturers: dict | None = None,
     courses: dict | None = None,
     slots_info: dict | None = None,
+    generating_department_id: str | None = None,
+    constraint_index: ConstraintIndex | None = None,
+    rooms: list[dict] | None = None,
+    external_bookings: dict | None = None,
 ) -> Chromosome:
     """
-    Guided mutation: when a lecturer has defined availability, prefer valid slots.
-    Falls back to random selection when guidance is unavailable or not applicable.
+    Guided mutation: respects lecturer availability and DB constraint blocked slots/rooms.
     """
     lecturers = lecturers or {}
     courses = courses or {}
     slots_info = slots_info or {}
+    idx = constraint_index or ConstraintIndex()
+    if not rooms:
+        if available_rooms and isinstance(available_rooms[0], dict):
+            rooms = available_rooms
+        else:
+            rooms = [{"id": rid} for rid in (available_rooms or [])]
+    external_bookings = external_bookings or {"room": {}, "lecturer": {}}
+    room_busy = _build_room_busy_slots(slots_info, external_bookings)
+    dept_id = generating_department_id or ""
+
+    if available_slots and isinstance(available_slots[0], dict):
+        slot_id_list = [s["id"] for s in available_slots]
+    else:
+        slot_id_list = list(available_slots or [])
 
     mutant = chromosome.clone()
     for gene in mutant.genes:
         if random.random() >= mutation_rate:
             continue
 
+        course = courses.get(gene.course_id, {})
+        lec_id = course.get("lecturer_id", "")
+        unit_dept = course.get("department_id") or dept_id
+        fixed_slot = idx.fixed_session(gene.course_id)
+
         action = random.choice(["room", "slot", "both"])
 
-        if action in ("room", "both") and available_rooms:
-            gene.room_id = random.choice(available_rooms)
+        if action in ("room", "both"):
+            eligible = idx.eligible_room_ids_for_gene(
+                rooms, unit_dept,
+                requires_lab=bool(course.get("requires_lab")),
+                slot_id=gene.time_slot_id,
+                room_busy_slots=room_busy,
+            )
+            if eligible:
+                gene.room_id = random.choice(eligible)
+            elif rooms:
+                gene.room_id = random.choice([r["id"] for r in rooms])
 
-        if action in ("slot", "both") and available_slots:
-            # Try guided slot selection
-            lec_id = courses.get(gene.course_id, {}).get("lecturer_id", "")
+        if action in ("slot", "both") and slot_id_list:
+            db_blocked = idx.blocked_slots_for_lecturer(lec_id) | idx.blocked_slots_for_course(gene.course_id)
             guided = False
             if lec_id and lec_id in lecturers:
                 lec = lecturers[lec_id]
                 avail = lec.get("availability", {})
-                unavail = lec.get("unavailable_slots", [])
-                # Build candidate set from availability
+                unavail = set(lec.get("unavailable_slots", [])) | db_blocked
                 if avail:
                     allowed = {sid for sids in avail.values() for sid in sids}
-                    candidates = [s for s in available_slots
+                    candidates = [s for s in slot_id_list
                                   if s in allowed and s not in unavail]
                 else:
-                    candidates = [s for s in available_slots if s not in unavail]
-                # Filter break/lunch slots
+                    candidates = [s for s in slot_id_list if s not in unavail]
                 candidates = [s for s in candidates
                               if slots_info.get(s, {}).get("slot_type", "class")
                               not in ("break", "lunch")
                               and not slots_info.get(s, {}).get("is_break", False)]
-                if candidates:
+                if fixed_slot and fixed_slot in candidates:
+                    gene.time_slot_id = fixed_slot
+                    guided = True
+                elif candidates:
                     gene.time_slot_id = random.choice(candidates)
                     guided = True
             if not guided:
-                # Random fallback but still filter breaks
-                clean = [s for s in available_slots
-                         if slots_info.get(s, {}).get("slot_type", "class")
+                clean = [s for s in slot_id_list
+                         if s not in db_blocked
+                         and slots_info.get(s, {}).get("slot_type", "class")
                          not in ("break", "lunch")
                          and not slots_info.get(s, {}).get("is_break", False)]
-                gene.time_slot_id = random.choice(clean) if clean else random.choice(available_slots)
+                if fixed_slot and fixed_slot in clean:
+                    gene.time_slot_id = fixed_slot
+                elif clean:
+                    gene.time_slot_id = random.choice(clean)
+                elif slot_id_list:
+                    gene.time_slot_id = random.choice(slot_id_list)
+
+        # Enforce room eligibility after any mutation (including slot-only changes)
+        eligible = idx.eligible_room_ids_for_gene(
+            rooms, unit_dept,
+            requires_lab=bool(course.get("requires_lab")),
+            slot_id=gene.time_slot_id,
+            room_busy_slots=room_busy,
+        )
+        if eligible and gene.room_id not in eligible:
+            gene.room_id = random.choice(eligible)
 
     return mutant
 

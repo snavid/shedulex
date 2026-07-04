@@ -192,6 +192,7 @@ export const adjustmentApi = {
   getSession:     (id)       => api.get(`/adjustments/sessions/${id}`),
   sessionChat:    (id, data) => api.post(`/adjustments/sessions/${id}/chat`, data, { timeout: 30000 }),
   sessionRespond: (id, data) => api.post(`/adjustments/sessions/${id}/respond`, data),
+  cancelSession:  (id)       => api.post(`/adjustments/sessions/${id}/cancel`),
   archiveSession: (id)       => api.post(`/adjustments/sessions/${id}/archive`),
 }
 

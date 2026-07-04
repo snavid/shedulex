@@ -9,9 +9,12 @@ from sqlalchemy.orm import joinedload, selectinload
 from app.extensions import db
 from app.models.domain import (
     Constraint, Course, CourseGroupLecturer, Department, Lecturer, Program, Room, StudentGroup,
-    TimeSlot, Timetable, TimetableEntry, TimetableSnapshot, TimetableTemplate,
+    TimeSlot, Timetable, TimetableComment, TimetableEntry, TimetableSnapshot, TimetableTemplate,
 )
 from app.ga import run_ga, GAConfig
+from app.ga.chromosome import Chromosome, Gene
+from app.ga.fitness import violation_report
+from app.ga.constraint_index import ConstraintIndex, filter_constraints_for_generation
 
 
 def _load_external_bookings(current_timetable: "Timetable") -> dict:
@@ -68,6 +71,191 @@ def _load_external_bookings(current_timetable: "Timetable") -> dict:
     return {"room": room_idx, "lecturer": lec_idx}
 
 
+def _serialize_course_for_ga(c: Course, group_lecturer_overrides: dict[tuple[str, str], str | None]) -> dict:
+    explicit_groups = [g.id for g in (c.student_groups or [])]
+    return {
+        "id": c.id,
+        "name": c.name,
+        "lecturer_id": c.lecturer_id,
+        "student_count": c.student_count,
+        "student_group_id": _resolve_student_group(c) if not explicit_groups else explicit_groups[0],
+        "student_group_ids": explicit_groups,
+        "per_group_lecturer_ids": {
+            gid: (
+                group_lecturer_overrides[(c.id, gid)]
+                if (c.id, gid) in group_lecturer_overrides
+                else c.lecturer_id
+            )
+            for gid in explicit_groups
+        },
+        "requires_lab": c.requires_lab,
+        "weekly_hours": c.weekly_hours,
+        "department_id": c.department_id,
+        "program_id": c.program_id,
+        "priority": c.priority,
+        "semester": c.semester,
+    }
+
+
+def _build_evaluation_context(timetable: Timetable, entries: list[TimetableEntry]) -> dict:
+    """Build GA evaluation context from current DB state for live violation recompute."""
+    dept = timetable.department
+    university_id = dept.university_id if dept else None
+    department_id = timetable.department_id or ""
+
+    course_ids = {e.course_id for e in entries}
+    courses = (
+        Course.query
+        .options(selectinload(Course.student_groups))
+        .filter(Course.id.in_(course_ids))
+        .all()
+    ) if course_ids else []
+
+    override_rows = CourseGroupLecturer.query.filter(
+        CourseGroupLecturer.course_id.in_(course_ids)
+    ).all() if course_ids else []
+    group_lecturer_overrides = {
+        (gl.course_id, gl.student_group_id): gl.lecturer_id
+        for gl in override_rows
+    }
+
+    slot_ids = {e.time_slot_id for e in entries}
+    if timetable.template_id:
+        slots = TimeSlot.query.filter(
+            db.or_(
+                TimeSlot.template_id == timetable.template_id,
+                TimeSlot.id.in_(slot_ids) if slot_ids else db.false(),
+            )
+        ).order_by(TimeSlot.slot_index).all()
+    elif slot_ids:
+        slots = TimeSlot.query.filter(TimeSlot.id.in_(slot_ids)).order_by(TimeSlot.slot_index).all()
+    else:
+        slots = TimeSlot.query.order_by(TimeSlot.slot_index).all()
+
+    rooms = Room.query.filter_by(is_available=True).all()
+    lecturers = Lecturer.query.filter_by(is_active=True).all()
+
+    group_ids = {e.student_group_id for e in entries if e.student_group_id}
+    student_groups = (
+        StudentGroup.query.filter(StudentGroup.id.in_(group_ids)).all()
+        if group_ids else []
+    )
+
+    db_constraints_all = [c.to_dict() for c in Constraint.query.filter_by(is_active=True).all()]
+    db_constraints_data = filter_constraints_for_generation(
+        db_constraints_all,
+        university_id=university_id,
+        generating_department_id=department_id,
+    )
+
+    courses_data = [_serialize_course_for_ga(c, group_lecturer_overrides) for c in courses]
+    return {
+        "courses": {c["id"]: c for c in courses_data},
+        "rooms": {
+            r.id: {
+                "id": r.id,
+                "capacity": r.capacity,
+                "room_type": r.room_type,
+                "name": r.name,
+                "building": r.building,
+                "has_projector": r.has_projector,
+                "has_lab_equipment": r.has_lab_equipment,
+            }
+            for r in rooms
+        },
+        "slots": {
+            s.id: {
+                "id": s.id,
+                "day": s.day,
+                "slot_index": s.slot_index,
+                "is_break": s.is_break,
+                "slot_type": s.slot_type or ("break" if s.is_break else "class"),
+                "label": s.label,
+                "start_time": s.start_time,
+                "end_time": s.end_time,
+            }
+            for s in slots
+        },
+        "lecturers": {
+            l.id: {
+                "id": l.id,
+                "name": l.name,
+                "availability": l.availability or {},
+                "max_hours_per_week": l.max_hours_per_week or 20,
+                "max_hours_per_day": l.max_hours_per_day or 6,
+                "max_consecutive_hours": l.max_consecutive_hours or 3,
+                "preferred_days": l.preferred_days or [],
+                "unavailable_slots": l.unavailable_slots or [],
+            }
+            for l in lecturers
+        },
+        "student_groups": {
+            g.id: {"id": g.id, "name": g.name, "code": g.code}
+            for g in student_groups
+        },
+        "db_constraints": db_constraints_data,
+        "external_bookings": _load_external_bookings(timetable),
+        "generating_department_id": department_id,
+        "constraint_index": ConstraintIndex(db_constraints_data),
+    }
+
+
+def _chromosome_from_entries(entries: list[TimetableEntry]) -> tuple[Chromosome, dict[int, str | None]]:
+    """Build a GA chromosome and per-gene lecturer map from persisted timetable entries."""
+    session_counter: dict[tuple[str, str], int] = {}
+    genes: list[Gene] = []
+    gene_lecturers: dict[int, str | None] = {}
+
+    for e in entries:
+        grp = e.student_group_id or ""
+        key = (e.course_id, grp)
+        session_index = session_counter.get(key, 0)
+        session_counter[key] = session_index + 1
+        genes.append(Gene(
+            course_id=e.course_id,
+            session_index=session_index,
+            room_id=e.room_id,
+            time_slot_id=e.time_slot_id,
+            student_group_id=grp,
+        ))
+        gene_lecturers[len(genes) - 1] = e.lecturer_id
+
+    return Chromosome(genes=genes), gene_lecturers
+
+
+def recompute_violation_report(timetable_id: str, *, persist: bool = True) -> list[dict]:
+    """Re-evaluate all constraints against the current saved timetable entries."""
+    tt = Timetable.query.get(timetable_id)
+    if not tt:
+        return []
+
+    entries = (
+        TimetableEntry.query
+        .options(
+            joinedload(TimetableEntry.time_slot),
+            joinedload(TimetableEntry.course),
+            joinedload(TimetableEntry.lecturer),
+            joinedload(TimetableEntry.room),
+            joinedload(TimetableEntry.student_group),
+        )
+        .filter_by(timetable_id=timetable_id)
+        .all()
+    )
+    if not entries:
+        report: list[dict] = []
+    else:
+        chromosome, gene_lecturers = _chromosome_from_entries(entries)
+        ctx = _build_evaluation_context(tt, entries)
+        ctx["gene_lecturers"] = gene_lecturers
+        report = violation_report(chromosome, ctx)
+
+    if persist:
+        tt.violation_report = report
+        db.session.commit()
+
+    return report
+
+
 def generate_timetable(
     department_id: str,
     semester: int,
@@ -111,10 +299,19 @@ def generate_timetable(
     if not slots:
         raise ValueError("No time slots configured.")
 
-    # Load all active constraints from DB (scoped to department/program/global)
+    dept = Department.query.get(department_id)
+    university_id = dept.university_id if dept else None
+
+    # Load active constraints scoped to this university / generating department
     constraint_q = Constraint.query.filter_by(is_active=True)
     db_constraints_raw = constraint_q.all()
-    db_constraints_data = [c.to_dict() for c in db_constraints_raw]
+    db_constraints_all = [c.to_dict() for c in db_constraints_raw]
+    db_constraints_data = filter_constraints_for_generation(
+        db_constraints_all,
+        university_id=university_id,
+        generating_department_id=department_id,
+    )
+    constraint_index = ConstraintIndex(db_constraints_data)
 
     # Load per-group lecturer overrides for these courses.
     # Include rows where lecturer_id IS NULL — those represent "explicitly unassigned"
@@ -240,6 +437,8 @@ def generate_timetable(
             config=ga_cfg,
             db_constraints=db_constraints_data,
             external_bookings=external_bookings,
+            generating_department_id=department_id,
+            constraint_index=constraint_index,
         )
     except Exception as exc:
         db.session.rollback()
@@ -489,6 +688,20 @@ def move_entry_to_slot(entry_id: str, time_slot_id: str, triggered_by: str | Non
     return entry
 
 
+def _entry_session_label(entry: TimetableEntry) -> str:
+    course_name = entry.course.name if entry.course else "Unknown"
+    if entry.student_group:
+        code = entry.student_group.code or entry.student_group.name
+        return f"{course_name} ({code})"
+    return course_name
+
+
+def _slot_label_from_entry(entry: TimetableEntry) -> str:
+    if entry.time_slot:
+        return f"{entry.time_slot.day} {entry.time_slot.start_time}–{entry.time_slot.end_time}"
+    return entry.time_slot_id
+
+
 def detect_conflicts(timetable_id: str) -> list[dict]:
     entries = (
         TimetableEntry.query
@@ -502,75 +715,90 @@ def detect_conflicts(timetable_id: str) -> list[dict]:
         .filter_by(timetable_id=timetable_id)
         .all()
     )
-    conflicts = []
-    seen_lec: dict = {}
-    seen_room: dict = {}
-    seen_grp: dict = {}
+    conflicts: list[dict] = []
+
+    lec_groups: dict[str, list[TimetableEntry]] = {}
+    room_groups: dict[str, list[TimetableEntry]] = {}
+    grp_groups: dict[str, list[TimetableEntry]] = {}
 
     for e in entries:
-        slot_label = (
-            f"{e.time_slot.day} {e.time_slot.start_time}"
-            if e.time_slot else e.time_slot_id
-        )
+        slot_label = _slot_label_from_entry(e)
 
         if e.lecturer_id:
-            key = f"{e.lecturer_id}:{e.time_slot_id}"
-            if key in seen_lec:
-                conflicts.append({
-                    "type": "lecturer_clash",
-                    "severity": "high",
-                    "rule": "H1 — Lecturer double-booked",
-                    "message": f"Lecturer '{e.lecturer.name if e.lecturer else e.lecturer_id}' double-booked at {slot_label}",
-                    "entry1": seen_lec[key], "entry2": e.id,
-                })
-            else:
-                seen_lec[key] = e.id
-
+            lec_groups.setdefault(f"{e.lecturer_id}:{e.time_slot_id}", []).append(e)
         if e.room_id:
-            key = f"{e.room_id}:{e.time_slot_id}"
-            if key in seen_room:
-                conflicts.append({
-                    "type": "room_clash",
-                    "severity": "high",
-                    "rule": "H2 — Room double-booked",
-                    "message": f"Room '{e.room.code if e.room else e.room_id}' double-booked at {slot_label}",
-                    "entry1": seen_room[key], "entry2": e.id,
-                })
-            else:
-                seen_room[key] = e.id
-
+            room_groups.setdefault(f"{e.room_id}:{e.time_slot_id}", []).append(e)
         if e.student_group_id:
-            key = f"{e.student_group_id}:{e.time_slot_id}"
-            if key in seen_grp:
-                conflicts.append({
-                    "type": "student_group_clash",
-                    "severity": "high",
-                    "rule": "H7 — Student group double-booked",
-                    "message": f"Student group '{e.student_group.name if e.student_group else e.student_group_id}' has two classes at {slot_label}",
-                    "entry1": seen_grp[key], "entry2": e.id,
-                })
-            else:
-                seen_grp[key] = e.id
+            grp_groups.setdefault(f"{e.student_group_id}:{e.time_slot_id}", []).append(e)
 
-        # Extra: class in break slot
+        if e.room and e.course and e.room.capacity < e.course.student_count:
+            conflicts.append({
+                "type": "room_over_capacity",
+                "severity": "high",
+                "rule": "H3 — Room over capacity",
+                "message": (
+                    f"{e.course.name} ({e.course.student_count} students) in "
+                    f"{e.room.name} (capacity {e.room.capacity})"
+                ),
+                "entry1": e.id,
+                "entry2": None,
+            })
+
         if e.time_slot and (e.time_slot.is_break or e.time_slot.slot_type in ("break", "lunch")):
             conflicts.append({
                 "type": "break_slot_violation",
                 "severity": "high",
                 "rule": "H6 — Class in break/lunch slot",
-                "message": f"{e.course.name if e.course else 'Unknown'} scheduled in a break period at {slot_label}",
-                "entry1": e.id, "entry2": None,
+                "message": f"{_entry_session_label(e)} scheduled in a break period at {slot_label}",
+                "entry1": e.id,
+                "entry2": None,
             })
+
+    def _append_group_conflicts(groups, conflict_type, category_rule, resource_label_fn):
+        for group in groups.values():
+            if len(group) < 2:
+                continue
+            labels = [_entry_session_label(e) for e in group]
+            slot_label = _slot_label_from_entry(group[0])
+            resource = resource_label_fn(group[0])
+            if len(labels) == 2:
+                message = f"{resource} has two classes at {slot_label}: {labels[0]} and {labels[1]}"
+            else:
+                message = f"{resource} has {len(labels)} classes at {slot_label}: {', '.join(labels)}"
+            conflicts.append({
+                "type": conflict_type,
+                "severity": "high",
+                "rule": category_rule,
+                "message": message,
+                "entry1": group[0].id,
+                "entry2": group[1].id,
+            })
+
+    _append_group_conflicts(
+        lec_groups,
+        "lecturer_clash",
+        "H1 — Lecturer double-booked",
+        lambda e: e.lecturer.name if e.lecturer else e.lecturer_id,
+    )
+    _append_group_conflicts(
+        room_groups,
+        "room_clash",
+        "H2 — Room double-booked",
+        lambda e: e.room.name if e.room else e.room_id,
+    )
+    _append_group_conflicts(
+        grp_groups,
+        "student_group_clash",
+        "H7 — Student group double-booked",
+        lambda e: e.student_group.name if e.student_group else e.student_group_id,
+    )
 
     return conflicts
 
 
 def get_violation_report(timetable_id: str) -> list[dict]:
-    """Return the stored violation report from last GA run."""
-    tt = Timetable.query.get(timetable_id)
-    if not tt:
-        return []
-    return tt.violation_report or []
+    """Recompute constraint violations from the current saved timetable entries."""
+    return recompute_violation_report(timetable_id, persist=True)
 
 
 def list_entries(timetable_id: str | None = None, day: str | None = None):
@@ -742,6 +970,15 @@ def restore_snapshot(snapshot_id: str) -> Timetable:
         changes=[{"snapshot_id": snapshot.id, "snapshot_notes": snapshot.notes}],
     ))
     return timetable
+
+
+def delete_timetable(timetable_id: str) -> None:
+    tt = Timetable.query.get(timetable_id)
+    if not tt:
+        raise ValueError("Timetable not found.")
+    TimetableComment.query.filter_by(timetable_id=timetable_id).delete(synchronize_session=False)
+    db.session.delete(tt)
+    db.session.commit()
 
 
 def seed_default_slots(template_id: str | None = None):

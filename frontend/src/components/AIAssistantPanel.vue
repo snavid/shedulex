@@ -61,7 +61,12 @@ const QUICK_ACTIONS = [
 // ── Open / close ───────────────────────────────────────────────────────────────
 async function open() {
   isOpen.value = true
-  if (!session.value) await initSession()
+  if (!session.value) {
+    await initSession()
+  } else if (session.value.status === "processing") {
+    beginProcessing("Working on your request…")
+    connectSSE(session.value.id)
+  }
   nextTick(scrollBottom)
 }
 
@@ -78,6 +83,10 @@ async function initSession() {
     const { data } = await adjustmentApi.createSession({ timetable_id: props.timetableId })
     session.value = data.data
     hydrateMessages(session.value)
+    if (session.value.status === "processing") {
+      beginProcessing("Working on your request…")
+      connectSSE(session.value.id)
+    }
   } catch (e) {
     console.error("Session init failed:", e)
     pushWelcome()
@@ -111,7 +120,13 @@ function hydrateMessages(s) {
 }
 
 async function newChat() {
-  disconnectSSE()
+  if (isProcessing.value && session.value) {
+    try { await adjustmentApi.cancelSession(session.value.id) } catch {}
+    disconnectSSE()
+    endProcessing()
+  } else {
+    disconnectSSE()
+  }
   if (session.value) {
     try { await adjustmentApi.archiveSession(session.value.id) } catch {}
   }
@@ -189,6 +204,20 @@ function endProcessing() {
   isProcessing.value = false
   thinkingText.value = ""
   liveSteps.value    = []
+}
+
+async function stopProcessing() {
+  if (!isProcessing.value || !session.value) return
+  try { await adjustmentApi.cancelSession(session.value.id) } catch {}
+  disconnectSSE()
+  endProcessing()
+  messages.value.push({
+    role:      "assistant",
+    content:   "Stopped. You can send a new request.",
+    toolTrace: [],
+    ts:        new Date(),
+  })
+  nextTick(scrollBottom)
 }
 
 function pushError(msg) {
@@ -289,6 +318,18 @@ function handleSSE(ev) {
         ts:        new Date(),
       }]
       emit("refresh")
+      refreshSession()
+      nextTick(scrollBottom)
+      break
+
+    case "cancelled":
+      endProcessing()
+      messages.value = [...messages.value, {
+        role:      "assistant",
+        content:   ev.message || "Stopped. You can send a new request.",
+        toolTrace: [],
+        ts:        new Date(),
+      }]
       refreshSession()
       nextTick(scrollBottom)
       break
@@ -455,6 +496,13 @@ defineExpose({ open, close })
               <span class="w-1.5 h-1.5 bg-white/70 rounded-full animate-bounce" style="animation-delay:240ms"/>
             </span>
             <span class="italic">{{ thinkingText }}</span>
+            <button
+              @click="stopProcessing"
+              class="ml-1 flex items-center gap-1 bg-white/15 hover:bg-red-500/80 text-white text-[10px] font-bold px-2 py-0.5 rounded-md transition-colors"
+              title="Stop Sora"
+            >
+              ■ Stop
+            </button>
           </div>
           <div v-else-if="interruptQ" class="flex items-center gap-1.5 text-amber-200 text-xs font-medium">
             <span class="text-amber-300">💬</span>
@@ -748,16 +796,23 @@ defineExpose({ open, close })
             />
           </div>
           <button
+            v-if="isProcessing"
+            @click="stopProcessing"
+            class="w-10 h-10 rounded-xl bg-red-500 hover:bg-red-600 text-white flex items-center justify-center flex-shrink-0 transition-colors shadow-md"
+            title="Stop"
+          >
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <rect x="6" y="6" width="12" height="12" rx="1"/>
+            </svg>
+          </button>
+          <button
+            v-else
             @click="send()"
             :disabled="!canSend || !input.trim() || sessionFull"
             class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white flex items-center justify-center flex-shrink-0 disabled:opacity-40 transition-opacity hover:opacity-90 shadow-md"
           >
-            <svg v-if="!isProcessing" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
-            </svg>
-            <svg v-else class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
             </svg>
           </button>
         </div>

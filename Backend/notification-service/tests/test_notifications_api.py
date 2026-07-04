@@ -58,19 +58,21 @@ class TestSendNotification:
         assert resp.status_code == 201
         assert resp.get_json()["data"]["status"] == "sent"
 
-    def test_sms_requires_phone(self, client, app):
+    def test_sms_without_phone_uses_default(self, client, app):
         with app.app_context():
-            resp = client.post(
-                "/api/v1/notifications/send",
-                json={
-                    "email": "user@test.com",
-                    "channel": "sms",
-                    "subject": "Test",
-                    "body": "Hello",
-                },
-                headers=_auth_headers(app),
-            )
-        assert resp.status_code == 422
+            with patch("app.routes.notifications.deliver_message", return_value=(True, None)) as mock_deliver:
+                resp = client.post(
+                    "/api/v1/notifications/send",
+                    json={
+                        "channel": "sms",
+                        "subject": "Test",
+                        "body": "Hello",
+                    },
+                    headers=_auth_headers(app),
+                )
+        assert resp.status_code == 201
+        mock_deliver.assert_called_once()
+        assert mock_deliver.call_args.kwargs["phone"] is None
 
 
 class TestBroadcast:

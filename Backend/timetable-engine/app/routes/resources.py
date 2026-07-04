@@ -32,6 +32,26 @@ def _update(instance, payload: dict, allowed_fields: tuple[str, ...]):
     return instance
 
 
+def _template_university_id(body: dict | None = None) -> str | None:
+    """Resolve university_id for template writes: body override, else JWT."""
+    body = body or {}
+    if body.get("university_id"):
+        return body["university_id"]
+    if is_internal_request():
+        return body.get("university_id")
+    return get_jwt_university_id()
+
+
+def _check_template_access(template: TimetableTemplate):
+    """Return a 404 fail response if the caller's university doesn't own the template."""
+    if is_internal_request():
+        return None
+    uni_id = get_jwt_university_id()
+    if uni_id and template.university_id and template.university_id != uni_id:
+        return fail("Template not found.", status=404)
+    return None
+
+
 def _dynamic_update(instance, payload: dict):
     """Keep legacy behavior: apply any attribute present on the model instance."""
     for key, value in payload.items():
@@ -784,6 +804,9 @@ def list_templates():
 @service_or_jwt_required()
 def get_template(template_id):
     template = TimetableTemplate.query.get_or_404(template_id)
+    err = _check_template_access(template)
+    if err:
+        return err
     return ok(data=template.to_dict(include_blocks=True))
 
 
@@ -796,7 +819,7 @@ def create_template():
     template = TimetableTemplate(
         name=body["name"],
         description=body.get("description"),
-        university_id=body.get("university_id"),
+        university_id=_template_university_id(body),
         is_default=body.get("is_default", False),
         days_of_week=body.get("days_of_week", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]),
     )
@@ -822,7 +845,17 @@ def create_template():
 @service_or_jwt_required(*WRITE_ROLES)
 def update_template(template_id):
     template = TimetableTemplate.query.get_or_404(template_id)
-    _update(template, json_body(), ("name", "description", "university_id", "is_default", "days_of_week"))
+    err = _check_template_access(template)
+    if err:
+        return err
+    body = json_body()
+    if not is_internal_request() and body.get("university_id") is None and "university_id" in body:
+        body = {k: v for k, v in body.items() if k != "university_id"}
+    if template.university_id is None:
+        backfill = _template_university_id(body)
+        if backfill:
+            template.university_id = backfill
+    _update(template, body, ("name", "description", "university_id", "is_default", "days_of_week"))
     return ok(data=template.to_dict(include_blocks=True))
 
 
@@ -830,6 +863,9 @@ def update_template(template_id):
 @service_or_jwt_required(*WRITE_ROLES)
 def delete_template(template_id):
     template = TimetableTemplate.query.get_or_404(template_id)
+    err = _check_template_access(template)
+    if err:
+        return err
     _delete(template)
     return ok(message="Template deleted.")
 
@@ -838,7 +874,10 @@ def delete_template(template_id):
 @resources_bp.get("/templates/<template_id>/blocks")
 @service_or_jwt_required()
 def list_template_blocks(template_id):
-    TimetableTemplate.query.get_or_404(template_id)
+    template = TimetableTemplate.query.get_or_404(template_id)
+    err = _check_template_access(template)
+    if err:
+        return err
     blocks = TemplateTimeBlock.query.filter_by(template_id=template_id).order_by(
         TemplateTimeBlock.sort_order
     ).all()
@@ -848,7 +887,10 @@ def list_template_blocks(template_id):
 @resources_bp.post("/templates/<template_id>/blocks")
 @service_or_jwt_required(*WRITE_ROLES)
 def create_template_block(template_id):
-    TimetableTemplate.query.get_or_404(template_id)
+    template = TimetableTemplate.query.get_or_404(template_id)
+    err = _check_template_access(template)
+    if err:
+        return err
     body = json_body()
     if not body.get("label") or not body.get("start_time") or not body.get("end_time"):
         return fail("label, start_time and end_time are required.", status=422)
@@ -867,6 +909,10 @@ def create_template_block(template_id):
 @resources_bp.put("/templates/<template_id>/blocks/<block_id>")
 @service_or_jwt_required(*WRITE_ROLES)
 def update_template_block(template_id, block_id):
+    template = TimetableTemplate.query.get_or_404(template_id)
+    err = _check_template_access(template)
+    if err:
+        return err
     block = TemplateTimeBlock.query.filter_by(id=block_id, template_id=template_id).first_or_404()
     _update(block, json_body(), ("label", "start_time", "end_time", "block_type", "sort_order"))
     return ok(data=block.to_dict())
@@ -875,6 +921,10 @@ def update_template_block(template_id, block_id):
 @resources_bp.delete("/templates/<template_id>/blocks/<block_id>")
 @service_or_jwt_required(*WRITE_ROLES)
 def delete_template_block(template_id, block_id):
+    template = TimetableTemplate.query.get_or_404(template_id)
+    err = _check_template_access(template)
+    if err:
+        return err
     block = TemplateTimeBlock.query.filter_by(id=block_id, template_id=template_id).first_or_404()
     _delete(block)
     return ok(message="Block deleted.")
@@ -888,6 +938,9 @@ def generate_slots_from_template(template_id):
     Existing slots for this template are replaced.
     """
     template = TimetableTemplate.query.get_or_404(template_id)
+    err = _check_template_access(template)
+    if err:
+        return err
     if not template.blocks:
         return fail("Template has no blocks defined.", status=400)
 

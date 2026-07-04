@@ -1,9 +1,11 @@
 <script setup>
 import { ref, onMounted, computed } from "vue"
 import { resourcesApi, getErrorMessage } from "@/api/client"
+import { useAuthStore } from "@/stores/auth"
 import { useToast } from "vue-toastification"
 
 const toast = useToast()
+const auth = useAuthStore()
 const loading = ref(true)
 const saving = ref(false)
 const generating = ref(false)
@@ -74,6 +76,7 @@ async function createTemplate() {
   try {
     const { data } = await resourcesApi.createTemplate({
       ...templateForm.value,
+      university_id: auth.user?.university_id,
       blocks: [],
     })
     templates.value.push(data.data)

@@ -201,7 +201,7 @@ def restore_version(snapshot_id):
 @timetable_bp.get("/<timetable_id>/violations")
 @service_or_jwt_required()
 def get_violations(timetable_id):
-    """Return the GA violation report stored on the timetable after generation."""
+    """Recompute and return constraint violations for the current timetable state."""
     tt = timetable_service.get_timetable_by_id(timetable_id)
     if not tt:
         return fail("Timetable not found.", status=404)
@@ -263,12 +263,14 @@ def archive_timetable(timetable_id):
 @service_or_jwt_required("admin", "timetable_officer")
 def delete_timetable(timetable_id):
     """Permanently delete a timetable and all its entries."""
-    from app.models.domain import Timetable
-    from app.extensions import db
-    tt = Timetable.query.get_or_404(timetable_id)
+    tt = timetable_service.get_timetable_by_id(timetable_id)
+    if not tt:
+        return fail("Timetable not found.", status=404)
     err = _check_timetable_access(tt)
     if err:
         return err
-    db.session.delete(tt)
-    db.session.commit()
+    try:
+        timetable_service.delete_timetable(timetable_id)
+    except ValueError as e:
+        return fail(str(e), status=404)
     return ok(message="Timetable deleted.")

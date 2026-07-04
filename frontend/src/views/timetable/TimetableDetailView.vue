@@ -185,11 +185,14 @@ async function confirmMove() {
     toast.success(`Moved ${moveModal.entry.course?.code} → ${moveModal.targetSlot.day} ${moveModal.targetSlot.start_time}. HOD, timetable officer, and affected lecturer will be notified within 1 minute.`)
     moveModal.visible = false
     await store.fetchTimetable(route.params.id)
+    store.conflicts = []
     const tid = store.currentTimetable?.template_id
     if (tid) resourcesApi.getTemplate(tid)
       .then(({ data }) => { templateBlocks.value = data.data?.blocks || [] })
       .catch(() => {})
     await loadVersions()
+    if (showViolationsPanel.value) await loadViolations()
+    else store.conflicts = []
   } catch (e) {
     toast.error(getErrorMessage(e, "Failed to move session."))
   } finally {
@@ -496,10 +499,31 @@ async function restoreSnapshot(snapshotId) {
     }
     toast.success(`Timetable restored to version ${data?.data?.version ?? '?'}.`)
     await loadVersions()
+    store.conflicts = []
+    if (showViolationsPanel.value) await loadViolations()
   } catch (e) {
     toast.error(getErrorMessage(e, "Could not restore version."))
   } finally {
     restoringSnapshotId.value = ""
+  }
+}
+
+async function syncViolationBanner() {
+  try {
+    const { data } = await timetableApi.violations(route.params.id)
+    const report = data.data || []
+    if (store.currentTimetable) {
+      store.currentTimetable.violation_report = report
+    }
+  } catch {
+    /* banner is optional; ignore fetch errors */
+  }
+}
+
+async function refreshLiveReports() {
+  store.conflicts = []
+  if (showViolationsPanel.value) {
+    await loadViolations()
   }
 }
 
@@ -523,6 +547,9 @@ async function loadViolations() {
     const { data } = await timetableApi.violations(route.params.id)
     violations.value = data.data || []
     showViolationsPanel.value = true
+    if (store.currentTimetable) {
+      store.currentTimetable.violation_report = violations.value
+    }
   } catch (e) {
     toast.error(getErrorMessage(e, "Failed to load violation report."))
   } finally {
@@ -553,6 +580,7 @@ async function loadTimetablePage(id) {
       loadExportAnalytics(),
       loadVersions(),
       loadAllSlots(),
+      syncViolationBanner(),
       templateId
         ? resourcesApi.getTemplate(templateId)
             .then(({ data }) => { templateBlocks.value = data.data?.blocks || [] })
@@ -683,8 +711,7 @@ async function doDelete() {
         </div>
 
         <p class="text-xs text-gray-400">
-          This report reflects the GA's constraint evaluation from when the timetable was generated.
-          Use drag-and-drop or the AI assistant to resolve issues manually.
+          Reflects the current timetable state (recomputed live). Use drag-and-drop or the AI assistant to resolve issues.
         </p>
       </div>
 
@@ -696,7 +723,7 @@ async function doDelete() {
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
         </svg>
         <p class="text-sm text-amber-800">
-          <strong>{{ store.currentTimetable.violation_report.length }} constraint note(s)</strong> from the last GA run.
+          <strong>{{ store.currentTimetable.violation_report.length }} constraint note(s)</strong> detected in the current timetable.
           Click to view the full violation report.
         </p>
       </div>

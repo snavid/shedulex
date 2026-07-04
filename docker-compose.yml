@@ -293,6 +293,8 @@ services:
       BEEM_SECRET_KEY: ${BEEM_SECRET_KEY:-}
       BEEM_SENDER_NAME: ${BEEM_SENDER_NAME:-SHEDULEX}
       DEFAULT_SMS_PHONE: ${DEFAULT_SMS_PHONE:-+255749300606}
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:-dev-internal-service-key}
+    restart: unless-stopped
     networks:
       - shedulex-net
     depends_on:
@@ -323,6 +325,8 @@ services:
       BEEM_SECRET_KEY: ${BEEM_SECRET_KEY:-}
       BEEM_SENDER_NAME: ${BEEM_SENDER_NAME:-SHEDULEX}
       DEFAULT_SMS_PHONE: ${DEFAULT_SMS_PHONE:-+255749300606}
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:-dev-internal-service-key}
+    restart: unless-stopped
     networks:
       - shedulex-net
     depends_on:

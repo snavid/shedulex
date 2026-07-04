@@ -81,15 +81,18 @@ onBeforeUnmount(() => stopProgressAnimation(false))
 
 onMounted(async () => {
   await store.fetchDepartments()
-  const [pr, tr, sr] = await Promise.all([
-    resourcesApi.programs(),
-    resourcesApi.templates(),
-    calendarApi.semesters(),
-  ])
-  programs.value = pr.data.data || []
-  templates.value = tr.data.data || []
-  semesters.value = sr.data.data || []
-  // Pre-select current semester if available
+  try {
+    const [pr, tr, sr] = await Promise.all([
+      resourcesApi.programs(),
+      resourcesApi.templates(),
+      calendarApi.semesters(),
+    ])
+    programs.value = pr.data.data || []
+    templates.value = tr.data.data || []
+    semesters.value = sr.data.data || []
+  } catch (e) {
+    toast.error(getErrorMessage(e, "Failed to load generate form data."))
+  }
   const current = semesters.value.find(s => s.is_current)
   if (current) form.value.calendar_semester_id = current.id
 })
@@ -340,6 +343,10 @@ function viewTimetable() {
                 {{ t.name }}{{ t.is_default ? " (default)" : "" }}
               </option>
             </select>
+            <p v-if="!templates.length" class="text-xs text-gray-500 mt-1">
+              No schedule templates for your university. Create one under
+              <router-link to="/resources/time-slots" class="text-primary-600 hover:underline">Resources → Time Slots</router-link>.
+            </p>
           </div>
         </div>
       </div>

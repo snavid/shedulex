@@ -20,8 +20,6 @@ def _parse_send_payload(body: dict) -> tuple[dict, str | None]:
     channel = body.get("channel", "email")
     notif_type = body.get("type") or body.get("notification_type", "general")
 
-    if channel in ("sms", "both") and not phone:
-        return {}, "Phone number is required for SMS delivery."
     if channel in ("email", "both") and not email:
         return {}, "Email address is required for email delivery."
 

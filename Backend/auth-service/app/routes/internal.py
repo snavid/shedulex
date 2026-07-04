@@ -1,9 +1,43 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, current_app
+from sqlalchemy import or_, and_
+import json
+import urllib.request
+import urllib.error
 from app.extensions import db
 from app.middleware.internal_auth import require_internal_key
 from app.models.user import User, Role
 
 internal_bp = Blueprint("internal", __name__, url_prefix="/api/v1/users/internal")
+
+
+def _department_ids_for_university(university_id: str) -> list[str]:
+    """Resolve department IDs under a university via timetable-engine."""
+    base = current_app.config["TIMETABLE_SERVICE_URL"].rstrip("/")
+    url = f"{base}/api/v1/departments?university_id={university_id}"
+    req = urllib.request.Request(
+        url,
+        headers={"X-Internal-Service-Key": current_app.config.get("INTERNAL_SERVICE_KEY", "")},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read())
+            return [d["id"] for d in (body.get("data") or []) if d.get("id")]
+    except (urllib.error.URLError, json.JSONDecodeError, KeyError) as exc:
+        current_app.logger.warning("Department lookup failed for %s: %s", university_id, exc)
+        return []
+
+
+def _apply_university_filter(query, university_id: str):
+    """Match users by university_id, including legacy rows scoped only by department."""
+    dept_ids = _department_ids_for_university(university_id)
+    if dept_ids:
+        return query.filter(
+            or_(
+                User.university_id == university_id,
+                and_(User.university_id.is_(None), User.department_id.in_(dept_ids)),
+            )
+        )
+    return query.filter_by(university_id=university_id)
 
 
 @internal_bp.get("/recipients")
@@ -31,7 +65,7 @@ def list_recipients():
             return jsonify({"success": True, "data": [], "meta": {"page": page, "per_page": per_page, "total": 0, "pages": 0}}), 200
         query = query.filter_by(role_id=role.id)
     if university_id:
-        query = query.filter_by(university_id=university_id)
+        query = _apply_university_filter(query, university_id)
     if department_id:
         query = query.filter_by(department_id=department_id)
     if program_id:
@@ -57,6 +91,7 @@ def list_recipients():
             "program_id": u.program_id,
             "student_group_id": u.student_group_id,
             "department_id": u.department_id,
+            "university_id": u.university_id,
             "first_name": u.first_name,
             "last_name": u.last_name,
         }
@@ -94,6 +129,7 @@ def get_recipient(user_id):
             "program_id": user.program_id,
             "student_group_id": user.student_group_id,
             "department_id": user.department_id,
+            "university_id": user.university_id,
             "first_name": user.first_name,
             "last_name": user.last_name,
         },

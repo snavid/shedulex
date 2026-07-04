@@ -298,23 +298,46 @@ Penalises any class that is within `min_gap_slots` positions of an exam slot on 
 
 ---
 
-### Rule types defined in schema but NOT yet evaluated
-
-These are valid `rule_type` values in the schema docstring but the fitness dispatcher does not yet have a handler for them. **Creating them will not produce an error — they will just have no effect on the GA.**
+### Rule types — GA evaluation status
 
 | rule_type | Status |
 |-----------|--------|
-| `max_weekly_hours` | ❌ No handler (built-in S-weekly already covers this) |
-| `unavailable` | ❌ No handler (use `lecturer.unavailable_slots` profile field instead) |
-| `capacity_check` | ❌ No handler (H3 always runs this automatically) |
-| `equipment_required` | ❌ No handler |
-| `shared_room` | ❌ No handler |
-| `no_overlap` | ❌ No handler (H7 already covers student group) |
-| `semester_only` | ❌ No handler |
-| `fixed_session` | ❌ No handler |
-| `mandatory_order` | ❌ No handler |
-| `timezone_aware` | ❌ No handler |
-| `holiday_aware` | ❌ No handler |
+| `max_daily_hours` | ✅ Lecturer & student group |
+| `max_weekly_hours` | ✅ Lecturer & student group |
+| `max_consecutive` | ✅ Lecturer & student group |
+| `preferred_times` | ✅ Lecturer (soft) |
+| `unavailable` | ✅ Lecturer & course |
+| `course_preferred_times` | ✅ Course (soft) |
+| `course_unavailable` | ✅ Course |
+| `equipment_required` | ✅ Room |
+| **`shared_room`** | ✅ **Room — department allow-list + ranked priority** |
+| `fixed_session` | ✅ Course |
+| `mandatory_order` | ✅ Academic |
+| `semester_only` | ✅ Course |
+| `exam_gap` | ✅ Academic (soft) |
+| `capacity_check` | ⚙️ Automatic (built-in H3 — no DB rule needed) |
+| `no_overlap` | ⚙️ Automatic (built-in H7 — no DB rule needed) |
+| `timezone_aware` | ❌ Not implemented |
+| `holiday_aware` | ❌ Not implemented |
+
+#### `shared_room` — Department room access & priority
+
+Attach to a **specific room** (`entity_type: room`). Config:
+
+```json
+{
+  "allowed_department_ids": ["<cs-dept-uuid>", "<it-dept-uuid>"],
+  "priority_order": ["<cs-dept-uuid>", "<it-dept-uuid>"],
+  "department_weights": { "<cs-dept-uuid>": 1.0, "<it-dept-uuid>": 0.65 }
+}
+```
+
+- **One allowed department** + **Hard** → exclusive room for that department
+- **Multiple allowed** → shared room; departments not listed are blocked (when Hard)
+- **`priority_order`** → index 0 is highest priority; lower-priority depts get soft penalties
+- **`department_weights`** → optional fine-grained preference (0.1–1.0)
+
+Configure under **Resources → Constraints → Room → Department room access & priority**.
 
 ---
 

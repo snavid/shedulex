@@ -67,6 +67,7 @@ async function sendBroadcast() {
       body: form.body,
       audience: form.audience,
       channel: form.channel,
+      university_id: auth.user?.university_id || undefined,
       department_id: form.department_id || undefined,
       program_id: form.program_id || undefined,
     })

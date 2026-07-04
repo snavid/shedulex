@@ -9,6 +9,7 @@ const saving   = ref(false)
 const constraints = ref([])
 const lecturers   = ref([])
 const rooms       = ref([])
+const departments = ref([])
 const timeSlots   = ref([])
 const showForm    = ref(false)
 const editTarget  = ref(null)
@@ -26,16 +27,16 @@ const RULE_CATALOGUE = {
     { value: "unavailable",       label: "Unavailable periods" },
   ],
   room: [
-    { value: "capacity_check",    label: "Room capacity enforcement" },
+    { value: "shared_room",       label: "Department room access & priority" },
     { value: "equipment_required",label: "Required equipment" },
-    { value: "shared_room",       label: "Shared-room booking rules" },
+    { value: "capacity_check",    label: "Room capacity (automatic — built-in H3)" },
   ],
   student: [
-    { value: "no_overlap",        label: "No student group overlap" },
     { value: "max_consecutive",   label: "Max consecutive classes" },
     { value: "max_daily_hours",   label: "Max daily classes" },
     { value: "max_weekly_hours",  label: "Max weekly classes" },
     { value: "exam_gap",          label: "Exam preparation gap" },
+    { value: "no_overlap",        label: "No student overlap (automatic — built-in H7)" },
   ],
   academic: [
     { value: "semester_only",           label: "Semester-only module" },
@@ -44,10 +45,7 @@ const RULE_CATALOGUE = {
     { value: "course_preferred_times",  label: "Course preferred time slots" },
     { value: "course_unavailable",      label: "Course unavailable periods" },
   ],
-  system: [
-    { value: "timezone_aware",    label: "Timezone-aware scheduling" },
-    { value: "holiday_aware",     label: "Skip public holidays" },
-  ],
+  system: [],
 }
 
 // Default configData shape for each rule_type
@@ -64,14 +62,17 @@ const RULE_DEFAULTS = {
   mandatory_order:        { before_course_id: "", after_course_id: "" },
   course_preferred_times: { slot_ids: [] },
   course_unavailable:     { slot_ids: [] },
-  shared_room:            { departments: [] },
-  timezone_aware:    { timezone: "Africa/Nairobi" },
+  shared_room: {
+    allowed_department_ids: [],
+    priority_order: [],
+    department_weights: {},
+  },
   capacity_check:    {},
   no_overlap:        {},
   holiday_aware:     {},
 }
 
-const NO_CONFIG_RULES  = new Set(["capacity_check", "no_overlap", "holiday_aware"])
+const NO_CONFIG_RULES  = new Set(["capacity_check", "no_overlap"])
 const LIMIT_RULES      = new Set(["max_daily_hours", "max_weekly_hours", "max_consecutive"])
 const SLOT_ARRAY_RULES = new Set(["preferred_times", "unavailable", "course_preferred_times", "course_unavailable"])
 const EQUIPMENT_OPTIONS = ["projector", "whiteboard", "lab_equipment", "smart_board", "av_system"]
@@ -126,16 +127,75 @@ function slotLabel(id) {
   return s ? `${s.day} ${s.start_time}–${s.end_time}` : id.slice(0, 8) + "…"
 }
 
-// Writable computed for shared_room departments (comma-separated text input)
-const sharedRoomDepts = computed({
-  get: () => (form.value.configData.departments || []).join(", "),
-  set: (v) => {
-    form.value.configData = {
-      ...form.value.configData,
-      departments: v.split(",").map(s => s.trim()).filter(Boolean),
-    }
-  },
-})
+// ── shared_room helpers ────────────────────────────────────────────────────
+const deptLookup = computed(() => Object.fromEntries(departments.value.map(d => [d.id, d])))
+
+function deptName(id) {
+  return deptLookup.value[id]?.name || id?.slice?.(0, 8) + "…" || id
+}
+
+function normalizeSharedRoomConfig(cfg) {
+  const allowed = cfg.allowed_department_ids?.length
+    ? [...cfg.allowed_department_ids]
+    : [...(cfg.departments || [])]
+  const priority = cfg.priority_order?.length
+    ? cfg.priority_order.filter(id => allowed.includes(id))
+    : [...allowed]
+  const weights = { ...(cfg.department_weights || {}) }
+  return { allowed_department_ids: allowed, priority_order: priority, department_weights: weights }
+}
+
+function isDeptAllowed(deptId) {
+  const ids = form.value.configData.allowed_department_ids || []
+  return ids.includes(deptId)
+}
+
+function toggleSharedDept(deptId) {
+  const cfg = { ...form.value.configData }
+  const allowed = [...(cfg.allowed_department_ids || [])]
+  const order = [...(cfg.priority_order || [])]
+  const weights = { ...(cfg.department_weights || {}) }
+  const idx = allowed.indexOf(deptId)
+  if (idx >= 0) {
+    allowed.splice(idx, 1)
+    const oi = order.indexOf(deptId)
+    if (oi >= 0) order.splice(oi, 1)
+    delete weights[deptId]
+  } else {
+    allowed.push(deptId)
+    order.push(deptId)
+    weights[deptId] = 1.0
+  }
+  form.value.configData = {
+    ...cfg,
+    allowed_department_ids: allowed,
+    priority_order: order,
+    department_weights: weights,
+  }
+}
+
+function movePriorityDept(deptId, dir) {
+  const order = [...(form.value.configData.priority_order || [])]
+  const i = order.indexOf(deptId)
+  if (i < 0) return
+  const j = i + dir
+  if (j < 0 || j >= order.length) return
+  ;[order[i], order[j]] = [order[j], order[i]]
+  form.value.configData = { ...form.value.configData, priority_order: order }
+}
+
+function setDeptWeight(deptId, val) {
+  const weights = { ...(form.value.configData.department_weights || {}) }
+  weights[deptId] = Math.min(1, Math.max(0.1, Number(val) || 0.5))
+  form.value.configData = { ...form.value.configData, department_weights: weights }
+}
+
+function sharedRoomSummary(c) {
+  const cfg = normalizeSharedRoomConfig(c.config || {})
+  if (!cfg.allowed_department_ids.length) return null
+  const names = cfg.priority_order.map(deptName)
+  return names.join(" › ")
+}
 
 // ── Watchers ───────────────────────────────────────────────────────────────
 watch(() => form.value.category, () => {
@@ -150,15 +210,17 @@ watch(() => form.value.category, () => {
 
 watch(() => form.value.rule_type, (v) => {
   if (_openingEdit) return
-  // Reset config to sensible defaults for this rule
   form.value.configData = v && RULE_DEFAULTS[v]
     ? JSON.parse(JSON.stringify(RULE_DEFAULTS[v]))
     : {}
-  // Auto-set entity_type to match category
   if      (form.value.category === "lecturer") form.value.entity_type = "lecturer"
   else if (form.value.category === "room")     form.value.entity_type = "room"
   else if (form.value.category === "student")  form.value.entity_type = "student_group"
   else                                          form.value.entity_type = ""
+  if (v === "shared_room") {
+    form.value.entity_type = "room"
+    form.value.constraint_type = "hard"
+  }
   showRawJson.value  = false
   rawJsonError.value = ""
   rawJsonDraft.value = JSON.stringify(form.value.configData, null, 2)
@@ -279,16 +341,18 @@ function entityLabel(c) {
 async function load() {
   loading.value = true
   try {
-    const [cr, lr, rr, tr] = await Promise.all([
+    const [cr, lr, rr, tr, dr] = await Promise.all([
       resourcesApi.constraints(),
       resourcesApi.lecturers(),
       resourcesApi.rooms(),
       resourcesApi.timeSlots(),
+      resourcesApi.departments(),
     ])
     constraints.value = cr.data.data || []
     lecturers.value   = lr.data.data || []
     rooms.value       = rr.data.data || []
     timeSlots.value   = tr.data.data || []
+    departments.value = dr.data.data || []
   } catch (e) {
     toast.error(getErrorMessage(e, "Failed to load constraints."))
   } finally {
@@ -317,7 +381,9 @@ function openEdit(c) {
     entity_type:     c.entity_type || "",
     entity_id:       c.entity_id || "",
     weight:          c.weight,
-    configData:      JSON.parse(JSON.stringify(c.config || {})),
+    configData:      c.rule_type === "shared_room"
+      ? normalizeSharedRoomConfig(JSON.parse(JSON.stringify(c.config || {})))
+      : JSON.parse(JSON.stringify(c.config || {})),
   }
   rawJsonDraft.value = JSON.stringify(form.value.configData, null, 2)
   rawJsonError.value = ""
@@ -332,6 +398,20 @@ async function save() {
   if (!form.value.name)  { toast.error("Name is required."); return }
   if (rawJsonError.value) { toast.error("Fix the JSON error before saving."); return }
   saving.value = true
+  let config = form.value.configData
+  if (form.value.rule_type === "shared_room") {
+    config = normalizeSharedRoomConfig(config)
+    if (!form.value.entity_id) {
+      toast.error("Select a room for this constraint.")
+      saving.value = false
+      return
+    }
+    if (!config.allowed_department_ids.length) {
+      toast.error("Select at least one allowed department.")
+      saving.value = false
+      return
+    }
+  }
   const payload = {
     name:            form.value.name,
     constraint_type: form.value.constraint_type,
@@ -340,7 +420,7 @@ async function save() {
     entity_type:     form.value.entity_type || null,
     entity_id:       form.value.entity_id  || null,
     weight:          Number(form.value.weight),
-    config:          form.value.configData,
+    config,
   }
   try {
     if (editTarget.value) {
@@ -683,25 +763,48 @@ onMounted(load)
 
         <!-- shared_room -->
         <template v-else-if="form.rule_type === 'shared_room'">
-          <div class="p-3 bg-white rounded-xl border border-gray-200 space-y-2">
-            <label class="text-xs font-medium text-gray-600 block">Departments sharing this room (comma-separated names or IDs)</label>
-            <input v-model="sharedRoomDepts" class="input"
-              placeholder="e.g. Faculty of IT, Faculty of Commerce"/>
-            <p v-if="(form.configData.departments || []).length" class="text-xs text-gray-400">
-              {{ (form.configData.departments || []).length }} department(s) listed
+          <div class="p-3 bg-white rounded-xl border border-gray-200 space-y-4">
+            <p class="text-xs text-gray-500">
+              Restrict which departments may use the selected room. Drag priority order so the GA prefers
+              higher departments when sharing. Use <strong>Hard</strong> to block unlisted departments entirely.
             </p>
+            <div>
+              <label class="text-xs font-medium text-gray-600 block mb-2">Allowed departments</label>
+              <div v-if="!departments.length" class="text-xs text-gray-400">No departments found.</div>
+              <div v-else class="flex flex-wrap gap-2">
+                <label v-for="d in departments" :key="d.id"
+                  class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer text-sm"
+                  :class="isDeptAllowed(d.id) ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-gray-200 bg-gray-50 text-gray-600'">
+                  <input type="checkbox" class="rounded text-blue-600" :checked="isDeptAllowed(d.id)"
+                    @change="toggleSharedDept(d.id)" />
+                  {{ d.name }}
+                </label>
+              </div>
+            </div>
+            <div v-if="(form.configData.priority_order || []).length > 1">
+              <label class="text-xs font-medium text-gray-600 block mb-2">Priority order (highest first)</label>
+              <ul class="space-y-2">
+                <li v-for="(deptId, idx) in form.configData.priority_order" :key="deptId"
+                  class="flex items-center gap-2 p-2 rounded-lg border border-gray-200 bg-gray-50">
+                  <span class="text-xs font-mono text-gray-400 w-5">{{ idx + 1 }}</span>
+                  <span class="flex-1 text-sm font-medium text-gray-800">{{ deptName(deptId) }}</span>
+                  <input type="number" min="0.1" max="1" step="0.05"
+                    :value="(form.configData.department_weights || {})[deptId] ?? 1"
+                    @input="setDeptWeight(deptId, $event.target.value)"
+                    class="input w-16 text-xs text-center py-1" title="Preference weight (0.1–1)" />
+                  <button type="button" class="p-1 text-gray-400 hover:text-gray-700" :disabled="idx === 0"
+                    @click="movePriorityDept(deptId, -1)">↑</button>
+                  <button type="button" class="p-1 text-gray-400 hover:text-gray-700"
+                    :disabled="idx === form.configData.priority_order.length - 1"
+                    @click="movePriorityDept(deptId, 1)">↓</button>
+                </li>
+              </ul>
+              <p class="text-xs text-gray-400 mt-1">Weight is optional — lower weight = softer penalty when this dept uses the room.</p>
+            </div>
           </div>
         </template>
 
-        <!-- timezone_aware -->
-        <template v-else-if="form.rule_type === 'timezone_aware'">
-          <div class="p-3 bg-white rounded-xl border border-gray-200">
-            <label class="text-xs font-medium text-gray-600 block mb-1.5">Timezone</label>
-            <select v-model="form.configData.timezone" class="input">
-              <option v-for="tz in TIMEZONES" :key="tz" :value="tz">{{ tz }}</option>
-            </select>
-          </div>
-        </template>
+        <!-- timezone_aware (removed from catalogue) -->
 
         <!-- Advanced raw JSON (shown when toggle is on, for all known rules) -->
         <div v-if="form.rule_type && !NO_CONFIG_RULES.has(form.rule_type) && showRawJson" class="mt-2">
@@ -821,7 +924,10 @@ onMounted(load)
           <p class="text-xs text-gray-400 mt-1 space-x-2">
             <span>Weight: <span class="font-mono">{{ c.weight }}</span></span>
             <span v-if="entityLabel(c)" class="text-purple-600">· {{ entityLabel(c) }}</span>
-            <span v-if="c.config && Object.keys(c.config).length">
+            <span v-if="c.rule_type === 'shared_room' && sharedRoomSummary(c)" class="text-teal-700">
+              · {{ sharedRoomSummary(c) }}
+            </span>
+            <span v-else-if="c.config && Object.keys(c.config).length && c.rule_type !== 'shared_room'">
               · <span class="font-mono">{{ JSON.stringify(c.config) }}</span>
             </span>
           </p>

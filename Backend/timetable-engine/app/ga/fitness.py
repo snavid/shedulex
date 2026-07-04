@@ -32,6 +32,7 @@ Soft constraints (violation → proportional penalty scaled by weight):
 from __future__ import annotations
 from collections import defaultdict
 from app.ga.chromosome import Chromosome
+from app.ga.constraint_index import ConstraintIndex
 
 HARD_PENALTY = 1000.0
 SOFT_WEIGHTS = {
@@ -87,6 +88,35 @@ def _severity(c: dict, soft_factor: float) -> float:
     return float(c.get("weight", 1.0)) * soft_factor
 
 
+def _gene_lecturer_id(gene, course: dict, context: dict, gene_index: int) -> str:
+    gene_lecturers = context.get("gene_lecturers")
+    if gene_lecturers is not None and gene_index in gene_lecturers:
+        lec = gene_lecturers[gene_index]
+        return lec or ""
+    per_group = course.get("per_group_lecturer_ids") or {}
+    if gene.student_group_id and gene.student_group_id in per_group:
+        val = per_group[gene.student_group_id]
+        return val or ""
+    return course.get("lecturer_id", "") or ""
+
+
+def _session_label(course: dict, gene, context: dict) -> str:
+    name = course.get("name", gene.course_id)
+    grp_id = gene.student_group_id or course.get("student_group_id", "")
+    if grp_id:
+        groups = context.get("student_groups") or {}
+        g = groups.get(grp_id, {})
+        code = g.get("code") or g.get("name") or grp_id
+        return f"{name} ({code})"
+    return name
+
+
+def _clash_message(resource_label: str, slot_label: str, labels: list[str]) -> str:
+    if len(labels) == 2:
+        return f"{resource_label} has two classes at {slot_label}: {labels[0]} and {labels[1]}"
+    return f"{resource_label} has {len(labels)} classes at {slot_label}: {', '.join(labels)}"
+
+
 def evaluate(chromosome: Chromosome, context: dict) -> float:
     """
     Returns a fitness score ∈ [0, 1] where 1.0 = perfect schedule.
@@ -99,6 +129,7 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
     slots   = context["slots"]
     lecturers = context["lecturers"]
     db_constraints: list[dict] = context.get("db_constraints", [])
+    constraint_index: ConstraintIndex = context.get("constraint_index") or ConstraintIndex(db_constraints)
     _ext = context.get("external_bookings", {"room": {}, "lecturer": {}})
     ext_room: dict = _ext.get("room", {})
     ext_lec:  dict = _ext.get("lecturer", {})
@@ -116,11 +147,11 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
     # (slot_id, actor_id) → room_id; used for S10 building check
     slot_room_for_actor: dict[tuple, str] = {}
 
-    for gene in chromosome.genes:
+    for i, gene in enumerate(chromosome.genes):
         course   = courses.get(gene.course_id, {})
         room     = rooms.get(gene.room_id, {})
         slot     = slots.get(gene.time_slot_id, {})
-        lec_id   = course.get("lecturer_id", "")
+        lec_id   = _gene_lecturer_id(gene, course, context, i)
         grp_id   = gene.student_group_id or course.get("student_group_id", "")
         slot_day   = slot.get("day", "")
         slot_idx   = slot.get("slot_index", 0)
@@ -203,6 +234,17 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
 
         room_usage[gene.room_id] += 1
 
+        # DB shared_room — department allow-list + priority (per gene)
+        if gene.room_id:
+            dept_id = course.get("department_id", "")
+            room_rule = constraint_index.shared_room_constraints().get(gene.room_id)
+            if room_rule and room_rule["allowed"] and dept_id:
+                if dept_id not in room_rule["allowed"]:
+                    c = room_rule["constraint"]
+                    penalty += _severity(c, 80.0)
+                else:
+                    penalty += constraint_index.room_priority_penalty(gene.room_id, dept_id)
+
     # ── H8 – Lecturer daily hours ────────────────────────────────────────────
     for (lec_id, day), day_slot_ids in lec_day_slots.items():
         hours    = len(day_slot_ids)
@@ -256,9 +298,9 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
         penalty  += variance * SOFT_WEIGHTS["room_balance"] * 0.01
 
     # ── S6 – Lecturer preferred days ────────────────────────────────────────
-    for gene in chromosome.genes:
+    for i, gene in enumerate(chromosome.genes):
         course = courses.get(gene.course_id, {})
-        lec_id = course.get("lecturer_id", "")
+        lec_id = _gene_lecturer_id(gene, course, context, i)
         if lec_id and lecturers.get(lec_id):
             pref_days = lecturers[lec_id].get("preferred_days", [])
             if pref_days:
@@ -353,9 +395,9 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
             preferred_slot_ids = set(cfg.get("slot_ids", []))
             sev = _severity(c, 20.0)
             if preferred_slot_ids and eid:
-                for gene in chromosome.genes:
+                for i, gene in enumerate(chromosome.genes):
                     c_data = courses.get(gene.course_id, {})
-                    if c_data.get("lecturer_id") == eid:
+                    if _gene_lecturer_id(gene, c_data, context, i) == eid:
                         if gene.time_slot_id not in preferred_slot_ids:
                             penalty += sev
 
@@ -363,9 +405,9 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
             blocked = set(cfg.get("slot_ids", []))
             sev = _severity(c, 50.0)
             if blocked and eid:
-                for gene in chromosome.genes:
+                for i, gene in enumerate(chromosome.genes):
                     c_data = courses.get(gene.course_id, {})
-                    if c_data.get("lecturer_id") == eid and gene.time_slot_id in blocked:
+                    if _gene_lecturer_id(gene, c_data, context, i) == eid and gene.time_slot_id in blocked:
                         penalty += sev
 
         # ── Student-group rules ───────────────────────────────────────────────
@@ -406,6 +448,10 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
                         penalty += sev
                     if "whiteboard" in needs and not r.get("has_projector") and r.get("room_type") not in ("seminar", "lab"):
                         penalty += sev
+
+        elif rule == "shared_room" and etype == "room":
+            # Evaluated per-gene above via constraint_index; kept for explicit config routing
+            pass
 
         # ── Academic / course rules ───────────────────────────────────────────
         elif rule == "fixed_session":
@@ -499,6 +545,7 @@ def violation_report(chromosome: Chromosome, context: dict) -> list[dict]:
     slots     = context["slots"]
     lecturers = context["lecturers"]
     db_constraints: list[dict] = context.get("db_constraints", [])
+    constraint_index: ConstraintIndex = context.get("constraint_index") or ConstraintIndex(db_constraints)
     _ext_vr    = context.get("external_bookings", {"room": {}, "lecturer": {}})
     ext_room_vr: dict = _ext_vr.get("room", {})
     ext_lec_vr:  dict = _ext_vr.get("lecturer", {})
@@ -512,12 +559,13 @@ def violation_report(chromosome: Chromosome, context: dict) -> list[dict]:
     group_slots_vr:     dict[str, list[str]]   = defaultdict(list)
     lec_slots_vr:       dict[str, list[str]]   = defaultdict(list)
 
-    for gene in chromosome.genes:
+    for i, gene in enumerate(chromosome.genes):
         course    = courses.get(gene.course_id, {})
         room      = rooms.get(gene.room_id, {})
         slot      = slots.get(gene.time_slot_id, {})
-        lec_id    = course.get("lecturer_id", "")
+        lec_id    = _gene_lecturer_id(gene, course, context, i)
         grp_id    = gene.student_group_id or course.get("student_group_id", "")
+        session_label = _session_label(course, gene, context)
         slot_day       = slot.get("day", "")
         slot_start_vr  = slot.get("start_time", "")
         slot_end_vr    = slot.get("end_time", "")
@@ -526,26 +574,10 @@ def violation_report(chromosome: Chromosome, context: dict) -> list[dict]:
 
         if lec_id:
             key = f"{lec_id}:{gene.time_slot_id}"
-            lec_slot_map[key].append(course.get("name", gene.course_id))
-            if len(lec_slot_map[key]) == 2:
-                lec_name = lecturers.get(lec_id, {}).get("name", lec_id)
-                violations.append({
-                    "severity": "high", "category": "lecturer",
-                    "rule": "H1 — Lecturer double-booked",
-                    "message": f"{lec_name} has two classes at {slot_label}: "
-                               f"{lec_slot_map[key][0]} and {lec_slot_map[key][1]}",
-                })
+            lec_slot_map[key].append(session_label)
 
         rkey = f"{gene.room_id}:{gene.time_slot_id}"
-        room_slot_map[rkey].append(course.get("name", gene.course_id))
-        if len(room_slot_map[rkey]) == 2:
-            room_name = room.get("name", gene.room_id)
-            violations.append({
-                "severity": "high", "category": "room",
-                "rule": "H2 — Room double-booked",
-                "message": f"{room_name} has two classes at {slot_label}: "
-                           f"{room_slot_map[rkey][0]} and {room_slot_map[rkey][1]}",
-            })
+        room_slot_map[rkey].append(session_label)
 
         if room and course:
             cap, students = room.get("capacity", 0), course.get("student_count", 0)
@@ -574,14 +606,7 @@ def violation_report(chromosome: Chromosome, context: dict) -> list[dict]:
 
         if grp_id:
             gkey = f"{grp_id}:{gene.time_slot_id}"
-            group_slot_map[gkey].append(course.get("name", gene.course_id))
-            if len(group_slot_map[gkey]) == 2:
-                violations.append({
-                    "severity": "high", "category": "student",
-                    "rule": "H7 — Student group double-booked",
-                    "message": f"Student group has two classes at {slot_label}: "
-                               f"{group_slot_map[gkey][0]} and {group_slot_map[gkey][1]}",
-                })
+            group_slot_map[gkey].append(session_label)
 
         # H10 – Room booked by another active timetable
         if gene.room_id:
@@ -620,6 +645,71 @@ def violation_report(chromosome: Chromosome, context: dict) -> list[dict]:
             group_slots_vr[grp_id].append(gene.time_slot_id)
             if slot_day:
                 group_day_slots_vr[(grp_id, slot_day)].append(slot.get("slot_index", 0))
+
+        # shared_room — department access and priority
+        if gene.room_id:
+            dept_id = course.get("department_id", "")
+            room_rule = constraint_index.shared_room_constraints().get(gene.room_id)
+            if room_rule and room_rule["allowed"] and dept_id:
+                room_name = room.get("name", gene.room_id)
+                if dept_id not in room_rule["allowed"]:
+                    violations.append({
+                        "severity": "high", "category": "room",
+                        "rule": "Shared room — department not allowed",
+                        "message": (
+                            f"{course.get('name', gene.course_id)} uses {room_name} at {slot_label}, "
+                            f"but this room is restricted to other departments."
+                        ),
+                    })
+                elif constraint_index.room_priority_penalty(gene.room_id, dept_id) > 0:
+                    violations.append({
+                        "severity": "low", "category": "room",
+                        "rule": "Shared room — lower priority department",
+                        "message": (
+                            f"{course.get('name', gene.course_id)} uses priority room {room_name} "
+                            f"at {slot_label} (a higher-priority department is configured for this room)."
+                        ),
+                    })
+
+    for key, labels in lec_slot_map.items():
+        if len(labels) < 2:
+            continue
+        lec_id, slot_id = key.split(":", 1)
+        slot = slots.get(slot_id, {})
+        slot_label = f"{slot.get('day', '')} {slot.get('start_time', '')}–{slot.get('end_time', '')}"
+        lec_name = lecturers.get(lec_id, {}).get("name", lec_id)
+        violations.append({
+            "severity": "high", "category": "lecturer",
+            "rule": "H1 — Lecturer double-booked",
+            "message": _clash_message(lec_name, slot_label, labels),
+        })
+
+    for key, labels in room_slot_map.items():
+        if len(labels) < 2:
+            continue
+        room_id, slot_id = key.split(":", 1)
+        slot = slots.get(slot_id, {})
+        slot_label = f"{slot.get('day', '')} {slot.get('start_time', '')}–{slot.get('end_time', '')}"
+        room_name = rooms.get(room_id, {}).get("name", room_id)
+        violations.append({
+            "severity": "high", "category": "room",
+            "rule": "H2 — Room double-booked",
+            "message": _clash_message(room_name, slot_label, labels),
+        })
+
+    for key, labels in group_slot_map.items():
+        if len(labels) < 2:
+            continue
+        grp_id, slot_id = key.split(":", 1)
+        slot = slots.get(slot_id, {})
+        slot_label = f"{slot.get('day', '')} {slot.get('start_time', '')}–{slot.get('end_time', '')}"
+        groups = context.get("student_groups") or {}
+        grp_name = groups.get(grp_id, {}).get("name", grp_id)
+        violations.append({
+            "severity": "high", "category": "student",
+            "rule": "H7 — Student group double-booked",
+            "message": _clash_message(f"Student group {grp_name}", slot_label, labels),
+        })
 
     for (lec_id, day), hours in lec_day_count.items():
         lec_info = lecturers.get(lec_id, {})
@@ -762,5 +852,109 @@ def violation_report(chromosome: Chromosome, context: dict) -> list[dict]:
                             "rule": "Course scheduled in unavailable slot",
                             "message": f"{course.get('name', eid)} is in a blocked slot at {label}.",
                         })
+
+        elif rule == "max_daily_hours" and etype == "lecturer":
+            lim = int(cfg.get("limit", 6))
+            for (lec_id, day), day_s in lec_day_slots_vr.items():
+                if lec_id == eid and len(day_s) > lim:
+                    lec_info = lecturers.get(lec_id, {})
+                    violations.append({
+                        "severity": "medium", "category": "lecturer",
+                        "rule": "Lecturer daily hours exceeded (constraint)",
+                        "message": f"{lec_info.get('name', lec_id)} has {len(day_s)} sessions on {day} (limit {lim}).",
+                    })
+
+        elif rule == "max_weekly_hours" and etype == "lecturer":
+            lim = int(cfg.get("limit", 20))
+            if eid in lec_slots_vr and len(lec_slots_vr[eid]) > lim:
+                lec_info = lecturers.get(eid, {})
+                violations.append({
+                    "severity": "medium", "category": "lecturer",
+                    "rule": "Lecturer weekly hours exceeded (constraint)",
+                    "message": f"{lec_info.get('name', eid)} has {len(lec_slots_vr[eid])} sessions (limit {lim}).",
+                })
+
+        elif rule == "max_consecutive" and etype == "lecturer":
+            lim = int(cfg.get("limit", 3))
+            if eid in lec_slots_vr:
+                for day, day_idxs in _slots_per_day(lec_slots_vr[eid], slots).items():
+                    run = _consecutive_run(day_idxs)
+                    if run > lim:
+                        lec_info = lecturers.get(eid, {})
+                        violations.append({
+                            "severity": "medium", "category": "lecturer",
+                            "rule": "Lecturer consecutive periods exceeded",
+                            "message": f"{lec_info.get('name', eid)} has {run} consecutive periods on {day} (limit {lim}).",
+                        })
+
+        elif rule == "preferred_times" and etype == "lecturer":
+            preferred_slot_ids = set(cfg.get("slot_ids", []))
+            if preferred_slot_ids and eid:
+                for i, gene in enumerate(chromosome.genes):
+                    c_data = courses.get(gene.course_id, {})
+                    if _gene_lecturer_id(gene, c_data, context, i) == eid and gene.time_slot_id not in preferred_slot_ids:
+                        lec_info = lecturers.get(eid, {})
+                        slot = slots.get(gene.time_slot_id, {})
+                        label = f"{slot.get('day')} {slot.get('start_time')}"
+                        violations.append({
+                            "severity": "low", "category": "lecturer",
+                            "rule": "Outside preferred time slots",
+                            "message": f"{lec_info.get('name', eid)} — {c_data.get('name', gene.course_id)} at {label} is not preferred.",
+                        })
+
+        elif rule == "unavailable" and etype == "lecturer":
+            blocked = set(cfg.get("slot_ids", []))
+            if blocked and eid:
+                for i, gene in enumerate(chromosome.genes):
+                    c_data = courses.get(gene.course_id, {})
+                    if _gene_lecturer_id(gene, c_data, context, i) == eid and gene.time_slot_id in blocked:
+                        lec_info = lecturers.get(eid, {})
+                        slot = slots.get(gene.time_slot_id, {})
+                        label = f"{slot.get('day')} {slot.get('start_time')}"
+                        violations.append({
+                            "severity": "high", "category": "lecturer",
+                            "rule": "Lecturer unavailable slot used",
+                            "message": f"{lec_info.get('name', eid)} is scheduled at blocked slot {label}.",
+                        })
+
+        elif rule == "max_weekly_hours" and etype == "student_group":
+            lim = int(cfg.get("limit", 25))
+            if eid in group_slots_vr and len(group_slots_vr[eid]) > lim:
+                violations.append({
+                    "severity": "medium", "category": "student",
+                    "rule": "Student group weekly hours exceeded",
+                    "message": f"Student group {eid[:8]} has {len(group_slots_vr[eid])} sessions (limit {lim}).",
+                })
+
+        elif rule == "semester_only":
+            target_sem = int(cfg.get("semester", 1))
+            if eid:
+                for gene in chromosome.genes:
+                    if gene.course_id == eid:
+                        course_data = courses.get(gene.course_id, {})
+                        if course_data.get("semester") and course_data["semester"] != target_sem:
+                            violations.append({
+                                "severity": "high", "category": "academic",
+                                "rule": "Semester-only module violated",
+                                "message": f"{course_data.get('name', eid)} is scheduled but belongs to semester {target_sem} only.",
+                            })
+
+        elif rule == "exam_gap":
+            exam_slot_ids = set(cfg.get("exam_slot_ids", []))
+            gap = int(cfg.get("min_gap_slots", 2))
+            for gene in chromosome.genes:
+                slot_idx = slots.get(gene.time_slot_id, {}).get("slot_index", -1)
+                slot_day = slots.get(gene.time_slot_id, {}).get("day", "")
+                course = courses.get(gene.course_id, {})
+                for exam_sid in exam_slot_ids:
+                    exam_slot = slots.get(exam_sid, {})
+                    if exam_slot.get("day") == slot_day:
+                        dist = abs(slot_idx - exam_slot.get("slot_index", -1))
+                        if 0 < dist <= gap:
+                            violations.append({
+                                "severity": "low", "category": "academic",
+                                "rule": "Exam preparation gap violated",
+                                "message": f"{course.get('name', gene.course_id)} is too close to an exam slot on {slot_day}.",
+                            })
 
     return violations

@@ -8,6 +8,7 @@ New session-based API:
   POST   /sessions/<id>/chat          — send a message (returns 202, streams via SSE)
   GET    /sessions/<id>/stream        — SSE event stream for a session
   POST   /sessions/<id>/respond       — provide human answer after an interrupt
+  POST   /sessions/<id>/cancel        — stop an in-flight agent job
   POST   /sessions/<id>/archive       — manually archive a full session
 
 Legacy single-shot API (kept for backwards compatibility):
@@ -22,8 +23,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from threading import Thread
+from time import monotonic
 
 from flask import Blueprint, Response, request, jsonify, current_app, stream_with_context
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
@@ -40,10 +43,24 @@ from app.agents.graph import thread_config
 from app.services import timetable_snapshots
 from app.services.memory import compress_session, build_memory_context
 from app.services.vector_store import store_session_summary, retrieve_relevant_context
-from app.services.redis_pubsub import publish, subscribe, get_event_log, clear_event_log
+from app.services.redis_pubsub import publish, subscribe, get_event_log, clear_event_log, request_cancel, clear_cancel, is_cancelled
 
 logger = logging.getLogger(__name__)
 adjustments_bp = Blueprint("adjustments", __name__, url_prefix="/api/v1/adjustments")
+
+SORA_JOB_TIMEOUT_SEC = int(os.environ.get("SORA_JOB_TIMEOUT_SEC", "300"))
+
+
+def _finish_cancelled(session, session_id: str, emit, message: str = "Stopped by user.") -> None:
+    """Emit cancelled event, reset session status, clear cancel flag."""
+    try:
+        session.status = "active"
+        session.last_activity = datetime.now(timezone.utc)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    clear_cancel(session_id)
+    emit({"type": "cancelled", "message": message})
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -73,9 +90,27 @@ def _run_session_job(app, session_id: str, prompt: str, is_resume: bool = False,
 
         graph  = get_graph()
         config = thread_config(session_id)
+        started_at = monotonic()
 
         def emit(event: dict):
             publish(session_id, event)
+
+        def should_stop() -> bool:
+            if is_cancelled(session_id):
+                return True
+            if SORA_JOB_TIMEOUT_SEC > 0 and (monotonic() - started_at) >= SORA_JOB_TIMEOUT_SEC:
+                return True
+            return False
+
+        def handle_stop() -> None:
+            msg = "Stopped by user."
+            if not is_cancelled(session_id):
+                msg = f"Timed out after {SORA_JOB_TIMEOUT_SEC} seconds."
+            _finish_cancelled(session, session_id, emit, msg)
+
+        if is_cancelled(session_id):
+            handle_stop()
+            return
 
         try:
             if is_resume:
@@ -110,6 +145,10 @@ def _run_session_job(app, session_id: str, prompt: str, is_resume: bool = False,
             tool_trace    = []
 
             for chunk in graph.stream(stream_input, config=config, stream_mode="updates"):
+                if should_stop():
+                    handle_stop()
+                    return
+
                 # ── interrupt from ask_user tool ──
                 if "__interrupt__" in chunk:
                     iv = chunk["__interrupt__"]
@@ -119,6 +158,7 @@ def _run_session_job(app, session_id: str, prompt: str, is_resume: bool = False,
                     session.interrupt_data = {"question": question}
                     session.last_activity  = datetime.now(timezone.utc)
                     db.session.commit()
+                    clear_cancel(session_id)
                     emit({"type": "interrupt", "question": question})
                     return
 
@@ -179,6 +219,7 @@ def _run_session_job(app, session_id: str, prompt: str, is_resume: bool = False,
             )
 
             emit({"type": "done", "response": response_text, "tool_trace": tool_trace})
+            clear_cancel(session_id)
 
         except Exception as exc:
             logger.exception("Session job failed for %s", session_id)
@@ -187,6 +228,7 @@ def _run_session_job(app, session_id: str, prompt: str, is_resume: bool = False,
                 db.session.commit()
             except Exception:
                 pass
+            clear_cancel(session_id)
             emit({"type": "error", "message": str(exc)})
 
 
@@ -251,6 +293,8 @@ def get_session(session_id):
 def session_chat(session_id):
     """Send a user message to an active session. Agent runs in background, stream via SSE."""
     s = ConversationSession.query.get_or_404(session_id)
+    if s.status == "processing":
+        return jsonify({"success": False, "message": "Session is still processing. Stop the current request first."}), 409
     if s.status == "waiting_for_input":
         return jsonify({"success": False, "message": "Session is waiting for your response. Use /respond."}), 409
     if s.is_full:
@@ -262,7 +306,8 @@ def session_chat(session_id):
         return jsonify({"success": False, "message": "prompt required"}), 422
 
     clear_event_log(session_id)
-    s.status        = "active"
+    clear_cancel(session_id)
+    s.status        = "processing"
     s.last_activity = datetime.now(timezone.utc)
     db.session.commit()
 
@@ -277,6 +322,8 @@ def session_chat(session_id):
 def session_respond(session_id):
     """Provide the human answer after an interrupt and resume the agent."""
     s = ConversationSession.query.get_or_404(session_id)
+    if s.status == "processing":
+        return jsonify({"success": False, "message": "Session is still processing. Stop the current request first."}), 409
     if s.status != "waiting_for_input":
         return jsonify({"success": False, "message": "Session is not waiting for input."}), 409
 
@@ -291,12 +338,13 @@ def session_respond(session_id):
     msgs.append({"role": "user", "content": f"[Decision] {answer}", "ts": ts})
     s.messages       = msgs
     s.total_messages = len(msgs)
-    s.status         = "active"
+    s.status         = "processing"
     s.interrupt_data = None
     s.last_activity  = datetime.now(timezone.utc)
     db.session.commit()
 
     clear_event_log(session_id)
+    clear_cancel(session_id)
 
     app = current_app._get_current_object()
     Thread(
@@ -317,6 +365,14 @@ def archive_session(session_id):
     return jsonify({"success": True, "data": s.to_dict()}), 200
 
 
+@adjustments_bp.post("/sessions/<session_id>/cancel")
+@jwt_required()
+def cancel_session(session_id):
+    """Request cooperative cancellation of an in-flight agent job."""
+    ConversationSession.query.get_or_404(session_id)
+    request_cancel(session_id)
+    return jsonify({"success": True, "data": {"session_id": session_id, "status": "cancelling"}}), 202
+
 # ── SSE stream endpoint ───────────────────────────────────────────────────────
 
 @adjustments_bp.get("/sessions/<session_id>/stream")
@@ -332,6 +388,7 @@ def session_stream(session_id):
       {type: "tool_end",   tool: "...", output: "...", success: bool}
       {type: "interrupt",  question: "..."}
       {type: "done",       response: "...", tool_trace: [...]}
+      {type: "cancelled",  message: "..."}
       {type: "error",      message: "..."}
       {type: "keepalive"}   — sent every 15 s to keep connection alive
     """
@@ -341,7 +398,7 @@ def session_stream(session_id):
         # Replay any events that were published before the client connected
         for ev in get_event_log(session_id):
             yield f"data: {json.dumps(ev)}\n\n"
-            if ev.get("type") in ("done", "error", "interrupt"):
+            if ev.get("type") in ("done", "error", "interrupt", "cancelled"):
                 return
 
         # Subscribe for live events
@@ -367,7 +424,7 @@ def session_stream(session_id):
                 yield f"data: {data}\n\n"
 
                 parsed = json.loads(data)
-                if parsed.get("type") in ("done", "error", "interrupt"):
+                if parsed.get("type") in ("done", "error", "interrupt", "cancelled"):
                     break
                 idle = 0  # reset on real event
 
