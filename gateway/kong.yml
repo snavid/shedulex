@@ -109,6 +109,7 @@ services:
           - /api/v1/universities
         methods:
           - GET
+          - OPTIONS
         strip_path: false
     plugins:
       - name: rate-limiting
@@ -176,6 +177,7 @@ services:
           - PUT
           - PATCH
           - DELETE
+          - OPTIONS
         strip_path: false
     plugins:
       - name: jwt
@@ -293,6 +295,7 @@ plugins:
       origins:
         - "http://localhost:5173"
         - "http://localhost:8080"
+        - "https://shedulex.hudumatech.com"
       methods:
         - GET
         - POST
