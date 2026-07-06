@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import RemoveMessage, SystemMessage, trim_messages
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
@@ -22,6 +22,13 @@ from langgraph.prebuilt import ToolNode
 
 from app.agents.state import AdjustmentState
 from app.agents.tools import ALL_TOOLS
+
+# Token budget for the conversation portion of each LLM call, leaving headroom
+# under the model's context window for the system prompt, tool schemas, and
+# the response itself. Tool outputs (e.g. get_timetable_entries dumps) can be
+# large and accumulate every turn, so this is what actually keeps sessions
+# from hitting "context_length_exceeded" on long-running Sora conversations.
+MAX_CONTEXT_TOKENS = 100_000
 
 _SYSTEM_BASE = """\
 You are Sora, an expert AI assistant for the Shedulex academic timetabling system.
@@ -86,12 +93,13 @@ def _system_prompt(state: AdjustmentState) -> str:
 
 
 def _build_graph():
-    model = ChatOpenAI(
+    llm = ChatOpenAI(
         model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
         api_key=os.environ.get("OPENAI_API_KEY", ""),
         temperature=0,
         streaming=True,
-    ).bind_tools(ALL_TOOLS)
+    )
+    model = llm.bind_tools(ALL_TOOLS)
 
     tool_node = ToolNode(ALL_TOOLS)
 
@@ -100,8 +108,31 @@ def _build_graph():
         sys = SystemMessage(content=_system_prompt(state))
         # Always keep system message fresh (memory_context may differ per run)
         messages_no_sys = [m for m in messages if not isinstance(m, SystemMessage)]
-        response = model.invoke([sys] + messages_no_sys)
-        return {"messages": [response]}
+
+        # Bound what actually gets sent to the LLM. The checkpointed graph state
+        # (MemorySaver, keyed by session_id) grows every turn and is otherwise
+        # never trimmed, so long-running sessions eventually blow past the
+        # model's context limit — this is what was causing the reported
+        # "context_length_exceeded" error in Sora.
+        trimmed = trim_messages(
+            messages_no_sys,
+            max_tokens=MAX_CONTEXT_TOKENS,
+            token_counter=llm,
+            strategy="last",
+            start_on="human",
+            include_system=False,
+            allow_partial=False,
+        )
+
+        response = model.invoke([sys] + trimmed)
+
+        # Permanently drop whatever fell outside the trimmed window so the
+        # checkpointed state itself stays bounded across turns, instead of
+        # growing forever and re-triggering the same trim every time.
+        trimmed_ids = {m.id for m in trimmed}
+        dropped = [RemoveMessage(id=m.id) for m in messages_no_sys if m.id not in trimmed_ids]
+
+        return {"messages": dropped + [response]}
 
     def route_after_agent(state: AdjustmentState) -> str:
         last = state["messages"][-1]
