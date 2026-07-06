@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, nextTick, onUnmounted } from "vue"
-import { adjustmentApi } from "@/api/client"
+import { adjustmentApi, API_BASE } from "@/api/client"
 
 const props = defineProps({
   timetableId:   { type: String, required: true },
@@ -229,7 +229,7 @@ function pushError(msg) {
 function connectSSE(sessionId) {
   disconnectSSE()
   const token = localStorage.getItem("access_token")
-  fetch(`/api/v1/adjustments/sessions/${sessionId}/stream`, {
+  fetch(`${API_BASE}/adjustments/sessions/${sessionId}/stream`, {
     headers: { Authorization: `Bearer ${token}` },
   }).then(res => {
     if (!res.ok) throw new Error(`SSE ${res.status}`)

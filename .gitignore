@@ -1,2 +1,4 @@
 .env
-.env.example
+.env.production
+backups/
+frontend/.env.local

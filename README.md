@@ -81,7 +81,22 @@ docker compose -f docker-compose.yml -f docker-compose.dev-ports.yml up -d
 
 This publishes `localhost:5543` (Postgres) and `localhost:6490` (Redis) without exposing individual microservice ports.
 
-## Frontend Local Dev
+## VPS production deployment
+
+See **[deploy/DEPLOY.md](deploy/DEPLOY.md)** for migrating your local data to a VPS at `https://shedulex.hudumatech.com` (Docker + host Nginx + local frontend).
+
+Quick backup before migration:
+
+```bash
+bash scripts/backup.sh
+```
+
+On Windows if the bash script hangs, use PowerShell instead:
+
+```powershell
+.\scripts\backup.ps1
+```
+
 
 ```bash
 cd frontend

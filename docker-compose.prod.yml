@@ -1,0 +1,11 @@
+# Production overrides — Kong bound to localhost only.
+# Nginx on the host terminates HTTPS and proxies to 127.0.0.1:8000.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  kong:
+    ports:
+      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8001:8001"

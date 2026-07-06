@@ -14,6 +14,7 @@ const toast = useToast()
 const programs = ref([])
 const templates = ref([])
 const semesters = ref([])
+const studentGroups = ref([])
 const conflictPreview = ref(null)
 const generatedId = ref(null)
 
@@ -21,6 +22,7 @@ const form = ref({
   name: "",
   department_id: "",
   program_id: "",
+  student_group_ids: [],
   template_id: "",
   calendar_semester_id: "",
   semester: 1,
@@ -75,7 +77,24 @@ watch(() => form.value.calendar_semester_id, (id) => {
     if (!yearStore.currentYear) form.value.academic_year = sem.academic_year
   }
 })
-watch(() => form.value.department_id, () => { form.value.program_id = "" })
+watch(() => form.value.department_id, () => {
+  form.value.program_id = ""
+  form.value.student_group_ids = []
+  studentGroups.value = []
+})
+
+// Fetch the student groups for the selected programme so the admin can
+// optionally restrict generation to specific group(s) (e.g. Group A only).
+watch(() => form.value.program_id, async (progId) => {
+  form.value.student_group_ids = []
+  if (!progId) { studentGroups.value = []; return }
+  try {
+    const { data } = await resourcesApi.studentGroups({ program_id: progId })
+    studentGroups.value = data.data || []
+  } catch (e) {
+    toast.error(getErrorMessage(e, "Failed to load student groups."))
+  }
+})
 
 onBeforeUnmount(() => stopProgressAnimation(false))
 
@@ -134,6 +153,7 @@ async function generate() {
       name: form.value.name,
       department_id: form.value.department_id,
       program_id: form.value.program_id || undefined,
+      student_group_ids: form.value.student_group_ids.length ? form.value.student_group_ids : undefined,
       template_id: form.value.template_id || undefined,
       calendar_semester_id: form.value.calendar_semester_id || undefined,
       semester: form.value.semester,
@@ -323,6 +343,33 @@ function viewTimetable() {
               {{ p.name }} ({{ p.code }}) — {{ p.academic_level }}
             </option>
           </select>
+        </div>
+
+        <div v-if="form.program_id && studentGroups.length">
+          <label class="label">
+            Student Group(s) <span class="text-xs text-gray-400">(optional — leave unchecked for all groups)</span>
+          </label>
+          <div class="flex flex-wrap gap-2 mt-1">
+            <button
+              v-for="g in studentGroups"
+              :key="g.id"
+              type="button"
+              @click="form.student_group_ids.includes(g.id)
+                ? form.student_group_ids = form.student_group_ids.filter(id => id !== g.id)
+                : form.student_group_ids.push(g.id)"
+              :class="[
+                'px-3 py-1.5 rounded-full text-sm font-medium border transition-colors',
+                form.student_group_ids.includes(g.id)
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400',
+              ]"
+            >
+              {{ g.name }} ({{ g.code }}) — Y{{ g.year_of_study }}
+            </button>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">
+            {{ form.student_group_ids.length ? `Restricting to ${form.student_group_ids.length} group(s).` : "All groups in this programme will be scheduled." }}
+          </p>
         </div>
 
         <div class="grid grid-cols-2 gap-4">

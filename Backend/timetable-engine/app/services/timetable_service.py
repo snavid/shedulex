@@ -73,20 +73,21 @@ def _load_external_bookings(current_timetable: "Timetable") -> dict:
 
 def _serialize_course_for_ga(c: Course, group_lecturer_overrides: dict[tuple[str, str], str | None]) -> dict:
     explicit_groups = [g.id for g in (c.student_groups or [])]
+    resolved_groups = explicit_groups if explicit_groups else _resolve_student_groups(c)
     return {
         "id": c.id,
         "name": c.name,
         "lecturer_id": c.lecturer_id,
         "student_count": c.student_count,
-        "student_group_id": _resolve_student_group(c) if not explicit_groups else explicit_groups[0],
-        "student_group_ids": explicit_groups,
+        "student_group_id": resolved_groups[0] if resolved_groups else None,
+        "student_group_ids": resolved_groups,
         "per_group_lecturer_ids": {
             gid: (
                 group_lecturer_overrides[(c.id, gid)]
                 if (c.id, gid) in group_lecturer_overrides
                 else c.lecturer_id
             )
-            for gid in explicit_groups
+            for gid in resolved_groups
         },
         "requires_lab": c.requires_lab,
         "weekly_hours": c.weekly_hours,
@@ -267,10 +268,13 @@ def generate_timetable(
     calendar_semester_id: str | None = None,
     academic_year_id: str | None = None,
     config_overrides: dict | None = None,
+    student_group_ids: list[str] | None = None,
 ) -> Timetable:
     """
     Orchestrates the full GA pipeline for a department/semester pair.
     If program_id is given the schedule is scoped to that programme.
+    If student_group_ids is given, generation is restricted to those groups;
+    courses whose resolved groups don't intersect the filter are skipped entirely.
     Raises ValueError if there is not enough data to schedule.
     """
     course_q = Course.query.filter_by(semester=semester, is_active=True)
@@ -329,18 +333,28 @@ def generate_timetable(
     }
 
     # Serialise domain objects → plain dicts for GA layer.
-    # student_group_ids: explicit assignments take priority; fall back to program-inferred group.
+    # student_group_ids: explicit assignments take priority; fall back to program-inferred groups.
     # per_group_lecturer_ids: effective lecturer per group (override → course default).
+    requested_groups = set(student_group_ids) if student_group_ids else None
+
     courses_data = []
     for c in courses:
         explicit_groups = [g.id for g in (c.student_groups or [])]
+        resolved_groups = explicit_groups if explicit_groups else _resolve_student_groups(c)
+
+        if requested_groups is not None:
+            resolved_groups = [gid for gid in resolved_groups if gid in requested_groups]
+            if not resolved_groups:
+                # Course has no group relevant to the requested filter — skip it entirely.
+                continue
+
         courses_data.append({
             "id": c.id,
             "name": c.name,
             "lecturer_id": c.lecturer_id,
             "student_count": c.student_count,
-            "student_group_id": _resolve_student_group(c) if not explicit_groups else explicit_groups[0],
-            "student_group_ids": explicit_groups,  # GA population uses this to explode by group
+            "student_group_id": resolved_groups[0] if resolved_groups else None,
+            "student_group_ids": resolved_groups,  # GA population uses this to explode by group
             # Effective lecturer per group — GA population.py injects this per scheduling unit.
             # If an override row exists (even with lecturer_id=None), that wins over course default.
             "per_group_lecturer_ids": {
@@ -349,7 +363,7 @@ def generate_timetable(
                     if (c.id, gid) in group_lecturer_overrides
                     else c.lecturer_id                       # no override → course default
                 )
-                for gid in explicit_groups
+                for gid in resolved_groups
             },
             "requires_lab": c.requires_lab,
             "weekly_hours": c.weekly_hours,
@@ -357,6 +371,12 @@ def generate_timetable(
             "program_id": c.program_id,
             "priority": c.priority,
         })
+
+    if not courses_data:
+        scope = f"program {program_id}" if program_id else f"department {department_id}"
+        raise ValueError(
+            f"No courses apply to the selected student group(s) for {scope}, semester {semester}."
+        )
     rooms_data = [
         {
             "id": r.id,
@@ -490,16 +510,28 @@ def generate_timetable(
     return timetable
 
 
-def _resolve_student_group(course: Course) -> str | None:
-    """Return the first student group ID for a course's programme, if any."""
-    if course.program_id:
-        grp = (
-            StudentGroup.query
-            .filter_by(program_id=course.program_id, semester=course.semester, is_active=True)
-            .first()
+def _resolve_student_groups(course: Course) -> list[str]:
+    """Return all active student-group IDs matching a course's programme, year, and semester.
+
+    Fallback used when a course has no explicit course_student_groups rows. Filters
+    by year_of_study (previously omitted, which collapsed Year-2/3 courses onto
+    Year-1's group) and returns every matching row so the GA can explode the
+    course into one scheduling unit per group.
+    """
+    if not course.program_id:
+        return []
+    groups = (
+        StudentGroup.query
+        .filter_by(
+            program_id=course.program_id,
+            year_of_study=course.year_of_study,
+            semester=course.semester,
+            is_active=True,
         )
-        return grp.id if grp else None
-    return None
+        .order_by(StudentGroup.code)
+        .all()
+    )
+    return [g.id for g in groups]
 
 
 def get_timetable_by_id(timetable_id: str) -> Timetable | None:
