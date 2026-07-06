@@ -361,8 +361,8 @@ class Course(db.Model):
             "program": self.program.to_dict() if self.program else None,
             "lecturer": self.lecturer.to_dict() if self.lecturer else None,
             "department": self.department.to_dict() if self.department else None,
-            "student_group_ids": [g.id for g in self.student_groups] if self.student_groups else [],
-            "student_groups": [{"id": g.id, "code": g.code, "name": g.name} for g in self.student_groups] if self.student_groups else [],
+            "student_group_ids": [g.id for g in self.student_groups if g.is_active],
+            "student_groups": [{"id": g.id, "code": g.code, "name": g.name} for g in self.student_groups if g.is_active],
             # Per-group lecturer overrides: { student_group_id: { lecturer_id, lecturer } }
             "group_lecturers": {
                 gl.student_group_id: {
@@ -370,6 +370,7 @@ class Course(db.Model):
                     "lecturer":    gl.lecturer.to_dict() if gl.lecturer else None,
                 }
                 for gl in self.group_lecturers
+                if gl.student_group is not None and gl.student_group.is_active
             },
         }
 

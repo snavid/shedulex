@@ -72,7 +72,7 @@ def _load_external_bookings(current_timetable: "Timetable") -> dict:
 
 
 def _serialize_course_for_ga(c: Course, group_lecturer_overrides: dict[tuple[str, str], str | None]) -> dict:
-    explicit_groups = [g.id for g in (c.student_groups or [])]
+    explicit_groups = [g.id for g in (c.student_groups or []) if g.is_active]
     resolved_groups = explicit_groups if explicit_groups else _resolve_student_groups(c)
     return {
         "id": c.id,
@@ -339,7 +339,7 @@ def generate_timetable(
 
     courses_data = []
     for c in courses:
-        explicit_groups = [g.id for g in (c.student_groups or [])]
+        explicit_groups = [g.id for g in (c.student_groups or []) if g.is_active]
         resolved_groups = explicit_groups if explicit_groups else _resolve_student_groups(c)
 
         if requested_groups is not None:

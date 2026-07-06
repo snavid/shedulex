@@ -8,7 +8,7 @@ import datetime as _dt
 from app.models.domain import (
     AcademicYear, Constraint, Course, CourseGroupLecturer, Department, Lecturer, Program,
     Room, StudentGroup, TimeSlot, TimetableTemplate, TemplateTimeBlock,
-    TimetableEntry, University,
+    TimetableEntry, University, course_student_groups,
 )
 from app.security import service_or_jwt_required, get_jwt_university_id, is_internal_request
 from app.utils.responses import fail, json_body, ok
@@ -329,6 +329,14 @@ def update_student_group(group_id):
 def delete_student_group(group_id):
     group = StudentGroup.query.get_or_404(group_id)
     group.is_active = False
+    # Detach from courses so CoursesView/AssignmentsView and GA generation
+    # don't keep treating this deactivated group as assigned.
+    db.session.execute(
+        course_student_groups.delete().where(
+            course_student_groups.c.student_group_id == group_id
+        )
+    )
+    CourseGroupLecturer.query.filter_by(student_group_id=group_id).delete(synchronize_session=False)
     db.session.commit()
     return ok(message="Student group deactivated.")
 
@@ -551,7 +559,10 @@ def delete_course(course_id):
 @service_or_jwt_required()
 def list_course_groups(course_id):
     course = Course.query.get_or_404(course_id)
-    return ok(data=[{"id": g.id, "code": g.code, "name": g.name, "student_count": g.student_count} for g in course.student_groups])
+    return ok(data=[
+        {"id": g.id, "code": g.code, "name": g.name, "student_count": g.student_count}
+        for g in course.student_groups if g.is_active
+    ])
 
 
 @resources_bp.post("/courses/<course_id>/groups")
