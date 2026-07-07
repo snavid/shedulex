@@ -47,10 +47,16 @@ def unseed():
         room_ids = [r[0] for r in db.session.execute(
             text("SELECT id FROM rooms WHERE university_id = :uni"), params
         ).fetchall()]
+        year_ids = [r[0] for r in db.session.execute(
+            text("SELECT id FROM academic_years WHERE university_id = :uni"), params
+        ).fetchall()]
         timetable_ids = [r[0] for r in db.session.execute(
-            text("SELECT id FROM timetables WHERE department_id = ANY(:depts) OR program_id = ANY(:progs)"),
-            {"depts": dept_ids or [None], "progs": prog_ids or [None]},
-        ).fetchall()] if (dept_ids or prog_ids) else []
+            text("""
+                SELECT id FROM timetables
+                WHERE department_id = ANY(:depts) OR program_id = ANY(:progs) OR academic_year_id = ANY(:years)
+            """),
+            {"depts": dept_ids or [None], "progs": prog_ids or [None], "years": year_ids or [None]},
+        ).fetchall()]
 
         print(f"  Departments: {len(dept_ids)}  Programmes: {len(prog_ids)}  Courses: {len(course_ids)}")
         print(f"  Student groups: {len(group_ids)}  Lecturers: {len(lecturer_ids)}  Rooms: {len(room_ids)}")
@@ -111,6 +117,7 @@ def unseed():
         db.session.execute(text("DELETE FROM rooms WHERE university_id = :uni"), params)
         db.session.execute(text("DELETE FROM buildings WHERE university_id = :uni"), params)
         db.session.execute(text("DELETE FROM departments WHERE university_id = :uni"), params)
+        db.session.execute(text("DELETE FROM academic_years WHERE university_id = :uni"), params)
         db.session.execute(text("DELETE FROM universities WHERE id = :uni"), params)
         db.session.commit()
 
