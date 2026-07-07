@@ -10,6 +10,7 @@ const router = createRouter({
     { path: "/verify-email", name: "verify-email", component: () => import("@/views/auth/VerifyEmailView.vue"), meta: { guest: true } },
     { path: "/reset-password", name: "reset-password", component: () => import("@/views/auth/ResetPasswordView.vue"), meta: { guest: true } },
     { path: "/forgot-password", name: "forgot-password", component: () => import("@/views/auth/ForgotPasswordView.vue"), meta: { guest: true } },
+    { path: "/lecturer-register", name: "lecturer-register", component: () => import("@/views/auth/LecturerRegisterView.vue"), meta: { guest: true } },
     { path: "/p/:uniCode", name: "student-portal", component: () => import("@/views/portal/StudentPortalView.vue"), meta: { guest: true } },
 
     // Protected routes (inside app shell)
@@ -65,7 +66,7 @@ router.beforeEach(async (to, from, next) => {
   }
 
   if (to.meta.guest && auth.isAuthenticated) {
-    if (to.name !== "student-portal") {
+    if (!["student-portal", "lecturer-register"].includes(to.name)) {
       return next({ name: "dashboard" })
     }
   }

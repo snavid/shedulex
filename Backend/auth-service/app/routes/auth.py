@@ -191,6 +191,37 @@ def change_password():
     return jsonify({"success": True, "message": "Password changed successfully."}), 200
 
 
+@auth_bp.get("/lecturer-invite/<token>")
+def get_lecturer_invite(token):
+    try:
+        data = auth_service.preview_lecturer_invite(token)
+    except ValueError as e:
+        return jsonify({"success": False, "message": str(e)}), 400
+    return jsonify({"success": True, "data": data}), 200
+
+
+@auth_bp.post("/lecturer-invite/confirm")
+@limiter.limit("10 per hour")
+def confirm_lecturer_invite():
+    body = request.get_json() or {}
+    if not body.get("token") or not body.get("password"):
+        return jsonify({"success": False, "message": "Token and password are required."}), 422
+    try:
+        user = auth_service.complete_lecturer_invite(
+            token=body["token"], password=body["password"],
+            email=body.get("email"), phone=body.get("phone"),
+        )
+    except ValueError as e:
+        return jsonify({"success": False, "message": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+    return jsonify({
+        "success": True,
+        "message": "Account created successfully. You can now log in.",
+        "data": {"email": user.email},
+    }), 201
+
+
 @auth_bp.get("/me")
 @jwt_required()
 def me():

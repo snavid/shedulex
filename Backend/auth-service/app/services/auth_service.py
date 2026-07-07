@@ -9,6 +9,7 @@ import urllib.error
 from datetime import datetime, timezone, timedelta
 from flask import request, current_app
 from flask_jwt_extended import decode_token, create_access_token
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from app.extensions import db
 from app.models.user import User, Role, UserSession
 from app.services.token_service import generate_tokens, blacklist_token, blacklist_all_user_tokens
@@ -311,6 +312,130 @@ def create_lecturer_account(data: dict) -> tuple[User, str]:
         current_app.logger.warning("Credential email failed to send for %s", email)
 
     return user, plain_password
+
+
+LECTURER_INVITE_MAX_AGE = 60 * 60 * 24 * 14  # 14 days
+
+
+def _invite_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt="lecturer-invite")
+
+
+def create_lecturer_invite(
+    lecturer_id: str, name: str, email: str,
+    phone: str | None = None, department: str | None = None, university_id: str | None = None,
+) -> str:
+    """
+    Mint a signed, self-contained invite token for a lecturer with no auth
+    account yet — no DB row needed for the token itself; it carries its own
+    payload and expiry, and is re-verified against the live Lecturer record
+    (still unlinked?) at both preview and confirm time, so it can't be replayed
+    once the account has been created.
+    """
+    return _invite_serializer().dumps({
+        "lecturer_id": lecturer_id, "name": name, "email": email,
+        "phone": phone, "department": department, "university_id": university_id,
+    })
+
+
+def decode_lecturer_invite(token: str) -> dict:
+    try:
+        return _invite_serializer().loads(token, max_age=LECTURER_INVITE_MAX_AGE)
+    except SignatureExpired:
+        raise ValueError("This registration link has expired. Ask an admin to generate a new one.")
+    except BadSignature:
+        raise ValueError("Invalid registration link.")
+
+
+def _fetch_lecturer(lecturer_id: str) -> dict | None:
+    req = urllib.request.Request(
+        f"{TIMETABLE_URL}/api/v1/lecturers/{lecturer_id}",
+        headers={"X-Internal-Service-Key": INTERNAL_KEY},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read()).get("data")
+    except Exception:
+        current_app.logger.warning("Could not fetch lecturer %s from timetable-engine.", lecturer_id)
+        return None
+
+
+def _link_lecturer_user(lecturer_id: str, user_id: str, *, email: str, phone: str):
+    payload = json.dumps({"user_id": user_id, "email": email, "phone": phone}).encode()
+    req = urllib.request.Request(
+        f"{TIMETABLE_URL}/api/v1/lecturers/{lecturer_id}",
+        data=payload, method="PUT",
+        headers={"Content-Type": "application/json", "X-Internal-Service-Key": INTERNAL_KEY},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read()
+    except Exception as exc:
+        current_app.logger.error("Failed to link lecturer %s to user %s: %s", lecturer_id, user_id, exc)
+        raise RuntimeError(
+            "Your account was created, but we couldn't link it to your lecturer profile. "
+            "Contact an administrator to finish setup."
+        )
+
+
+def preview_lecturer_invite(token: str) -> dict:
+    """Decode + validate an invite for display on the registration form."""
+    data = decode_lecturer_invite(token)
+    lecturer = _fetch_lecturer(data["lecturer_id"])
+    if lecturer is None:
+        raise ValueError("Lecturer record not found.")
+    if lecturer.get("user_id"):
+        raise ValueError("This lecturer already has an account. Please log in instead.")
+    return {
+        "name": data["name"], "email": data["email"],
+        "phone": data.get("phone"), "department": data.get("department"),
+    }
+
+
+def complete_lecturer_invite(token: str, password: str, email: str | None, phone: str | None) -> User:
+    data = decode_lecturer_invite(token)
+    lecturer_id = data["lecturer_id"]
+
+    lecturer = _fetch_lecturer(lecturer_id)
+    if lecturer is None:
+        raise ValueError("Lecturer record not found.")
+    if lecturer.get("user_id"):
+        raise ValueError("This lecturer already has an account. Please log in instead.")
+
+    role = Role.query.filter_by(name="lecturer").first()
+    if not role:
+        raise RuntimeError("Lecturer role not found. Ensure roles are seeded.")
+
+    email = (email or data["email"]).strip().lower()
+    phone = (phone or data.get("phone") or "").strip()
+    if not phone:
+        raise ValueError("Phone number is required.")
+    if not password or len(password) < 8:
+        raise ValueError("Password must be at least 8 characters.")
+
+    if User.query.filter_by(email=email).first():
+        raise ValueError(f"A user with email '{email}' already exists.")
+
+    name_parts = data["name"].split()
+    first_name = name_parts[0] if name_parts else data["name"]
+    last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else first_name
+
+    username = f"{first_name.lower()}.{last_name.lower()}.{secrets.token_hex(3)}".replace(" ", "")
+    if User.query.filter_by(username=username).first():
+        username = f"{username}.{secrets.token_hex(3)}"
+
+    user = User(
+        email=email, username=username, first_name=first_name, last_name=last_name,
+        phone=phone, department=data.get("department"),
+        university_id=data.get("university_id"), role_id=role.id,
+        is_active=True, is_approved=True, is_verified=True, must_change_password=False,
+    )
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+
+    _link_lecturer_user(lecturer_id, user.id, email=email, phone=phone)
+    return user
 
 
 def _phone_matches_last4(phone: str | None, last4: str) -> bool:

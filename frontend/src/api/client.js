@@ -278,6 +278,13 @@ export const usersApi = {
   createLecturer: (data) => api.post("/users/lecturers", data),
   createStudent: (data) => api.post("/users/students", data),
   resendCredentials: (id) => api.post(`/users/${id}/resend-credentials`),
+  createLecturerInvite: (data) => api.post("/users/lecturer-invite-link", data),
+}
+
+// Public — no auth required, used on the lecturer self-registration page.
+export const lecturerInviteApi = {
+  preview: (token) => axios.get(`${BASE}/auth/lecturer-invite/${token}`),
+  confirm: (data) => axios.post(`${BASE}/auth/lecturer-invite/confirm`, data),
 }
 
 const PORTAL_TOKEN_KEY = "portal_access_token"

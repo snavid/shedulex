@@ -532,6 +532,13 @@ def get_my_lecturer_profile():
     return ok(data=lecturer.to_dict())
 
 
+@resources_bp.get("/lecturers/<lec_id>")
+@service_or_jwt_required()
+def get_lecturer(lec_id):
+    lecturer = Lecturer.query.options(joinedload(Lecturer.department)).get_or_404(lec_id)
+    return ok(data=lecturer.to_dict())
+
+
 @resources_bp.post("/lecturers")
 @service_or_jwt_required(*WRITE_ROLES)
 def create_lecturer():

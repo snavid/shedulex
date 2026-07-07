@@ -142,6 +142,38 @@ async function resend(userId, lecturerName) {
   }
 }
 
+const registerLink = ref(null)
+const generatingInvite = ref(null)
+
+async function generateInvite(l) {
+  generatingInvite.value = l.id
+  try {
+    const { data } = await usersApi.createLecturerInvite({
+      lecturer_id: l.id,
+      name: l.name,
+      email: l.email,
+      phone: l.phone,
+      department: l.department?.name,
+      university_id: l.department?.university_id,
+    })
+    registerLink.value = { name: l.name, url: data.data.invite_url }
+    window.open(data.data.invite_url, "_blank")
+  } catch (e) {
+    toast.error(e?.response?.data?.message || "Failed to generate registration link.")
+  } finally {
+    generatingInvite.value = null
+  }
+}
+
+async function copyRegisterLink() {
+  try {
+    await navigator.clipboard.writeText(registerLink.value.url)
+    toast.success("Link copied.")
+  } catch {
+    toast.error("Could not copy — select and copy the link manually.")
+  }
+}
+
 const deleteTarget = ref(null)
 const search = ref("")
 const deptFilter = ref("")
@@ -191,6 +223,23 @@ onMounted(loadData)
         <div class="flex gap-4"><span class="text-gray-500 min-w-[100px]">Name:</span><span class="font-semibold">{{ showCredentials.name }}</span></div>
         <div class="flex gap-4"><span class="text-gray-500 min-w-[100px]">Username:</span><span class="font-semibold">{{ showCredentials.username }}</span></div>
         <div class="flex gap-4"><span class="text-gray-500 min-w-[100px]">Password:</span><span class="font-semibold text-red-700">{{ showCredentials.default_password }}</span></div>
+      </div>
+    </div>
+
+    <!-- Register link flash panel -->
+    <div v-if="registerLink" class="card border-blue-200 bg-blue-50 space-y-3">
+      <div class="flex items-start justify-between">
+        <h3 class="font-semibold text-blue-900">Registration Link — {{ registerLink.name }}</h3>
+        <button @click="registerLink = null" class="text-blue-700 hover:text-blue-900 text-xl leading-none">&times;</button>
+      </div>
+      <p class="text-xs text-blue-700">
+        Opened in a new tab. Share this link with {{ registerLink.name }} so they can set their own password —
+        it expires in 14 days and only works once.
+      </p>
+      <div class="flex items-center gap-2 bg-white rounded-lg border border-blue-200 p-3">
+        <input :value="registerLink.url" readonly class="input flex-1 font-mono text-xs" @click="$event.target.select()" />
+        <button class="btn-secondary text-xs shrink-0" @click="copyRegisterLink">Copy</button>
+        <a :href="registerLink.url" target="_blank" rel="noopener" class="btn-primary text-xs shrink-0">Open</a>
       </div>
     </div>
 
@@ -391,6 +440,14 @@ onMounted(loadData)
           <div v-if="canManage" class="flex flex-wrap gap-2 shrink-0">
             <button class="btn-secondary text-xs" @click="openEdit(l)">Edit</button>
             <button v-if="l.user_id" class="btn-secondary text-xs" @click="resend(l.user_id, l.name)">Resend Credentials</button>
+            <button
+              v-else
+              class="btn-secondary text-xs"
+              :disabled="generatingInvite === l.id"
+              @click="generateInvite(l)"
+            >
+              {{ generatingInvite === l.id ? "Generating…" : "Register" }}
+            </button>
             <button class="btn-danger text-xs" @click="deleteTarget = l">Deactivate</button>
           </div>
         </div>

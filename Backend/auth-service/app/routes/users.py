@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from marshmallow import ValidationError
 from app.extensions import db
@@ -217,6 +217,27 @@ def create_lecturer():
     response_data = user.to_dict()
     response_data["default_password"] = plain_password  # visible to admin only at creation time
     return jsonify({"success": True, "data": response_data, "message": "Lecturer account created. Credentials emailed."}), 201
+
+
+@users_bp.post("/lecturer-invite-link")
+@jwt_required()
+@roles_required("admin", "timetable_officer", "hod")
+def create_lecturer_invite_link():
+    """Mint a self-registration link for a lecturer who has no auth account yet."""
+    body = request.get_json() or {}
+    required = ["lecturer_id", "name", "email"]
+    missing = [f for f in required if not body.get(f)]
+    if missing:
+        return jsonify({"success": False, "message": f"Missing fields: {', '.join(missing)}"}), 422
+
+    token = auth_service.create_lecturer_invite(
+        lecturer_id=body["lecturer_id"], name=body["name"], email=body["email"],
+        phone=body.get("phone"), department=body.get("department"),
+        university_id=body.get("university_id"),
+    )
+    frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:5173")
+    invite_url = f"{frontend_url}/lecturer-register?token={token}"
+    return jsonify({"success": True, "data": {"invite_url": invite_url, "token": token}}), 201
 
 
 @users_bp.post("/students")
