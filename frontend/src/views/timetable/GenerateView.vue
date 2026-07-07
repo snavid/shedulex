@@ -15,6 +15,7 @@ const programs = ref([])
 const templates = ref([])
 const semesters = ref([])
 const studentGroups = ref([])
+const buildings = ref([])
 const conflictPreview = ref(null)
 const generatedId = ref(null)
 
@@ -23,6 +24,7 @@ const form = ref({
   department_id: "",
   program_id: "",
   student_group_ids: [],
+  building_id: "",
   template_id: "",
   calendar_semester_id: "",
   semester: 1,
@@ -101,14 +103,16 @@ onBeforeUnmount(() => stopProgressAnimation(false))
 onMounted(async () => {
   await store.fetchDepartments()
   try {
-    const [pr, tr, sr] = await Promise.all([
+    const [pr, tr, sr, br] = await Promise.all([
       resourcesApi.programs(),
       resourcesApi.templates(),
       calendarApi.semesters(),
+      resourcesApi.buildings(),
     ])
     programs.value = pr.data.data || []
     templates.value = tr.data.data || []
     semesters.value = sr.data.data || []
+    buildings.value = br.data.data || []
   } catch (e) {
     toast.error(getErrorMessage(e, "Failed to load generate form data."))
   }
@@ -154,6 +158,7 @@ async function generate() {
       department_id: form.value.department_id,
       program_id: form.value.program_id || undefined,
       student_group_ids: form.value.student_group_ids.length ? form.value.student_group_ids : undefined,
+      building_id: form.value.building_id || undefined,
       template_id: form.value.template_id || undefined,
       calendar_semester_id: form.value.calendar_semester_id || undefined,
       semester: form.value.semester,
@@ -343,6 +348,17 @@ function viewTimetable() {
               {{ p.name }} ({{ p.code }}) — {{ p.academic_level }}
             </option>
           </select>
+        </div>
+
+        <div v-if="buildings.length">
+          <label class="label">Building <span class="text-xs text-gray-400">(optional — restrict generation to one building)</span></label>
+          <select v-model="form.building_id" class="input">
+            <option value="">All buildings</option>
+            <option v-for="b in buildings" :key="b.id" :value="b.id">{{ b.name }}</option>
+          </select>
+          <p class="text-xs text-gray-500 mt-1">
+            Courses requiring a specific fixed room, or a mandatory computer lab, are always exempt from this restriction.
+          </p>
         </div>
 
         <div v-if="form.program_id && studentGroups.length">

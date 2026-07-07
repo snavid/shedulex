@@ -80,6 +80,7 @@ def mutate(
     constraint_index: ConstraintIndex | None = None,
     rooms: list[dict] | None = None,
     external_bookings: dict | None = None,
+    building_id: str | None = None,
 ) -> Chromosome:
     """
     Guided mutation: respects lecturer availability and DB constraint blocked slots/rooms.
@@ -118,6 +119,9 @@ def mutate(
             eligible = idx.eligible_room_ids_for_gene(
                 rooms, unit_dept,
                 requires_lab=bool(course.get("requires_lab")),
+                required_room_type=course.get("required_room_type"),
+                fixed_room_id=course.get("fixed_room_id"),
+                building_id=building_id,
                 slot_id=gene.time_slot_id,
                 room_busy_slots=room_busy,
             )
@@ -166,6 +170,9 @@ def mutate(
         eligible = idx.eligible_room_ids_for_gene(
             rooms, unit_dept,
             requires_lab=bool(course.get("requires_lab")),
+            required_room_type=course.get("required_room_type"),
+            fixed_room_id=course.get("fixed_room_id"),
+            building_id=building_id,
             slot_id=gene.time_slot_id,
             room_busy_slots=room_busy,
         )

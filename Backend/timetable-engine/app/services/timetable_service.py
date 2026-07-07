@@ -103,6 +103,8 @@ def _serialize_course_for_ga(c: Course, group_lecturer_overrides: dict[tuple[str
             for gid in resolved_groups
         },
         "requires_lab": c.requires_lab,
+        "required_room_type": c.required_room_type,
+        "fixed_room_id": c.fixed_room_id,
         "weekly_hours": c.weekly_hours,
         "department_id": c.department_id,
         "program_id": c.program_id,
@@ -172,6 +174,7 @@ def _build_evaluation_context(timetable: Timetable, entries: list[TimetableEntry
                 "room_type": r.room_type,
                 "name": r.name,
                 "building": r.building,
+                "building_id": r.building_id,
                 "has_projector": r.has_projector,
                 "has_lab_equipment": r.has_lab_equipment,
             }
@@ -282,12 +285,16 @@ def generate_timetable(
     academic_year_id: str | None = None,
     config_overrides: dict | None = None,
     student_group_ids: list[str] | None = None,
+    building_id: str | None = None,
 ) -> Timetable:
     """
     Orchestrates the full GA pipeline for a department/semester pair.
     If program_id is given the schedule is scoped to that programme.
     If student_group_ids is given, generation is restricted to those groups;
     courses whose resolved groups don't intersect the filter are skipped entirely.
+    If building_id is given, non-exempt courses are scoped to rooms in that
+    building; courses requiring a mandatory computer lab or pinned to a
+    fixed_room_id are exempt from this restriction (see eligible_room_ids_for_gene).
     Raises ValueError if there is not enough data to schedule.
     """
     course_q = Course.query.filter_by(semester=semester, is_active=True)
@@ -299,6 +306,12 @@ def generate_timetable(
     if not courses:
         scope = f"program {program_id}" if program_id else f"department {department_id}"
         raise ValueError(f"No active courses found for {scope} and semester {semester}.")
+
+    if building_id and not Room.query.filter_by(building_id=building_id, is_available=True).first():
+        # Without this check, eligible_room_ids_for_gene silently falls back to
+        # the unrestricted room pool when a building has no matching rooms —
+        # generation would "succeed" while quietly ignoring the requested scope.
+        raise ValueError("No available rooms found in the selected building.")
 
     lecturers = Lecturer.query.filter_by(is_active=True).all()
     rooms = Room.query.filter_by(is_available=True).all()
@@ -379,6 +392,8 @@ def generate_timetable(
                 for gid in resolved_groups
             },
             "requires_lab": c.requires_lab,
+            "required_room_type": c.required_room_type,
+            "fixed_room_id": c.fixed_room_id,
             "weekly_hours": c.weekly_hours,
             "department_id": c.department_id,
             "program_id": c.program_id,
@@ -397,6 +412,7 @@ def generate_timetable(
             "room_type": r.room_type,
             "name": r.name,
             "building": r.building,
+            "building_id": r.building_id,
             "has_projector": r.has_projector,
             "has_lab_equipment": r.has_lab_equipment,
         }
@@ -472,6 +488,7 @@ def generate_timetable(
             external_bookings=external_bookings,
             generating_department_id=department_id,
             constraint_index=constraint_index,
+            building_id=building_id,
         )
     except Exception as exc:
         db.session.rollback()
@@ -992,6 +1009,8 @@ def reschedule_subset(
                 else ({group_id: c.lecturer_id} if group_id else {})
             ),
             "requires_lab": c.requires_lab,
+            "required_room_type": c.required_room_type,
+            "fixed_room_id": c.fixed_room_id,
             "weekly_hours": len(unit_entries),   # exactly the target subset count
             "department_id": c.department_id,
             "program_id": c.program_id,
@@ -1018,7 +1037,7 @@ def reschedule_subset(
     rooms = Room.query.filter_by(is_available=True).all()
     rooms_data = [{
         "id": r.id, "capacity": r.capacity, "room_type": r.room_type,
-        "name": r.name, "building": r.building,
+        "name": r.name, "building": r.building, "building_id": r.building_id,
         "has_projector": r.has_projector, "has_lab_equipment": r.has_lab_equipment,
     } for r in rooms]
 

@@ -185,6 +185,27 @@ class Department(db.Model):
         }
 
 
+class Building(db.Model):
+    """A physical building/block on campus, containing many Rooms."""
+    __tablename__ = "buildings"
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = db.Column(db.String(150), nullable=False)
+    code = db.Column(db.String(20))
+    university_id = db.Column(db.String(36), db.ForeignKey("universities.id"))
+    address = db.Column(db.String(300))
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "code": self.code,
+            "university_id": self.university_id,
+            "address": self.address,
+        }
+
+
 class Program(db.Model):
     """A study programme within a department, e.g. BCS, BIT, DCS."""
     __tablename__ = "programs"
@@ -263,8 +284,9 @@ class Room(db.Model):
     name = db.Column(db.String(100), nullable=False)
     code = db.Column(db.String(20), nullable=False, unique=True)
     capacity = db.Column(db.Integer, nullable=False, default=30)
-    room_type = db.Column(db.String(50), default="lecture")  # lecture, lab, seminar
-    building = db.Column(db.String(100))
+    room_type = db.Column(db.String(50), default="lecture")  # lecture, lab, seminar, auditorium, science_lab, main_hall
+    building = db.Column(db.String(100))  # legacy free-text; superseded by building_id, kept for display fallback
+    building_id = db.Column(db.String(36), db.ForeignKey("buildings.id"), nullable=True, index=True)
     floor = db.Column(db.Integer, default=1)
     has_projector = db.Column(db.Boolean, default=True)
     has_lab_equipment = db.Column(db.Boolean, default=False)
@@ -272,11 +294,15 @@ class Room(db.Model):
     university_id = db.Column(db.String(36), db.ForeignKey("universities.id"), nullable=True, index=True)
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+    building_ref = db.relationship("Building", foreign_keys=[building_id])
+
     def to_dict(self):
         return {
             "id": self.id, "name": self.name, "code": self.code,
             "capacity": self.capacity, "room_type": self.room_type,
-            "building": self.building, "floor": self.floor,
+            "building": self.building, "building_id": self.building_id,
+            "building_detail": self.building_ref.to_dict() if self.building_ref else None,
+            "floor": self.floor,
             "has_projector": self.has_projector, "has_lab_equipment": self.has_lab_equipment,
             "is_available": self.is_available, "university_id": self.university_id,
         }
@@ -338,6 +364,8 @@ class Course(db.Model):
     weekly_hours = db.Column(db.Integer, default=3)  # contact hours per week
     student_count = db.Column(db.Integer, default=30)
     requires_lab = db.Column(db.Boolean, default=False)
+    required_room_type = db.Column(db.String(50), nullable=True)  # lecture|lab|seminar|auditorium|science_lab|main_hall
+    fixed_room_id = db.Column(db.String(36), db.ForeignKey("rooms.id"), nullable=True)
     course_type = db.Column(db.String(50), default="core")  # core, elective, lab
     priority = db.Column(db.Integer, default=1)  # higher = scheduled first
     is_active = db.Column(db.Boolean, default=True)
@@ -349,6 +377,7 @@ class Course(db.Model):
     student_groups = db.relationship("StudentGroup", secondary="course_student_groups", back_populates="courses")
     group_lecturers = db.relationship("CourseGroupLecturer", back_populates="course",
                                       cascade="all, delete-orphan", lazy="selectin")
+    fixed_room = db.relationship("Room", foreign_keys=[fixed_room_id])
 
     def to_dict(self):
         return {
@@ -356,6 +385,9 @@ class Course(db.Model):
             "semester": self.semester, "year_of_study": self.year_of_study,
             "credit_hours": self.credit_hours, "weekly_hours": self.weekly_hours,
             "student_count": self.student_count, "requires_lab": self.requires_lab,
+            "required_room_type": self.required_room_type,
+            "fixed_room_id": self.fixed_room_id,
+            "fixed_room": self.fixed_room.to_dict() if self.fixed_room else None,
             "course_type": self.course_type, "priority": self.priority,
             "program_id": self.program_id,
             "program": self.program.to_dict() if self.program else None,

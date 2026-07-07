@@ -131,20 +131,44 @@ class ConstraintIndex:
         department_id: str,
         *,
         requires_lab: bool = False,
+        required_room_type: str | None = None,
+        fixed_room_id: str | None = None,
+        building_id: str | None = None,
         slot_id: str | None = None,
         room_busy_slots: dict[str, set[str]] | None = None,
     ) -> list[str]:
-        """Return room IDs eligible for mutation/init for one gene."""
+        """Return room IDs eligible for mutation/init for one gene.
+
+        Priority (highest first):
+          1. fixed_room_id set -> always exactly that room (bypasses dept/building/
+             type/slot filtering entirely — the generator must obey this).
+          2. required_room_type == 'lab' (mandatory computer lab) -> exempt from
+             building_id scoping, since not every building has a computer lab.
+          3. otherwise -> hard-scoped to building_id if given.
+        """
+        if fixed_room_id:
+            return [fixed_room_id]
+
         room_busy_slots = room_busy_slots or {}
         pool = self.rooms_for_department(all_rooms, department_id)
-        if requires_lab:
-            lab = [r for r in pool if r.get("room_type") == "lab"]
-            if lab:
-                pool = lab
+
+        effective_type = required_room_type or ("lab" if requires_lab else None)
+        is_mandatory_lab = effective_type == "lab"
+
+        if building_id and not is_mandatory_lab:
+            scoped = [r for r in pool if r.get("building_id") == building_id]
+            if scoped:
+                pool = scoped
+
+        if effective_type:
+            typed = [r for r in pool if r.get("room_type") == effective_type]
+            if typed:
+                pool = typed
         else:
             non_lab = [r for r in pool if r.get("room_type") != "lab"]
             if non_lab:
                 pool = non_lab
+
         if slot_id:
             free = [
                 r for r in pool

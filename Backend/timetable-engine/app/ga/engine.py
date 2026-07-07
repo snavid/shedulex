@@ -78,6 +78,7 @@ def run_ga(
     generating_department_id: str | None = None,
     constraint_index: ConstraintIndex | None = None,
     progress_callback=None,
+    building_id: str | None = None,
 ) -> GAResult:
     """
     Main entry point for the genetic algorithm.
@@ -118,6 +119,7 @@ def run_ga(
         "external_bookings": external_bookings or {"room": {}, "lecturer": {}},
         "generating_department_id": generating_department_id or "",
         "constraint_index": idx,
+        "building_id": building_id or "",
     }
 
     room_ids = [r["id"] for r in rooms]
@@ -132,6 +134,7 @@ def run_ga(
         external_bookings=ctx["external_bookings"],
         generating_department_id=generating_department_id,
         constraint_index=idx,
+        building_id=building_id,
     )
 
     # Step 2 – Initial parallel fitness evaluation
@@ -179,12 +182,14 @@ def run_ga(
                 generating_department_id=generating_department_id,
                 constraint_index=idx, rooms=rooms,
                 external_bookings=ctx["external_bookings"],
+                building_id=building_id,
             )
             c2 = mutate(
                 c2, mutation_rate, room_ids, slot_ids, lecturers, ctx["courses"], slots_info,
                 generating_department_id=generating_department_id,
                 constraint_index=idx, rooms=rooms,
                 external_bookings=ctx["external_bookings"],
+                building_id=building_id,
             )
             pending.extend([c1, c2])
 
@@ -220,6 +225,7 @@ def run_ga(
                 external_bookings=ctx["external_bookings"],
                 generating_department_id=generating_department_id,
                 constraint_index=idx,
+                building_id=building_id,
             )
             _parallel_evaluate(fresh, ctx, _EVAL_WORKERS)
             population[-inject_count:] = fresh

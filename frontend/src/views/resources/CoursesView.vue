@@ -4,6 +4,7 @@ import { RouterLink } from "vue-router"
 import { resourcesApi, getErrorMessage } from "@/api/client"
 import { useAcademicYearStore } from "@/stores/academicYear"
 import { useToast } from "vue-toastification"
+import { ROOM_TYPES } from "@/constants/roomTypes"
 
 const toast = useToast()
 const yearStore = useAcademicYearStore()
@@ -13,6 +14,7 @@ const courses = ref([])
 const departments = ref([])
 const lecturers = ref([])
 const studentGroups = ref([])
+const rooms = ref([])
 const showForm = ref(false)
 const editTarget = ref(null)
 const deleteTarget = ref(null)
@@ -22,10 +24,14 @@ const deptFilter = ref("")
 const blank = () => ({
   name: "", code: "", department_id: "", lecturer_id: "",
   semester: yearStore.currentSemester, year_of_study: 1, weekly_hours: 3,
-  student_count: 40, requires_lab: false, priority: 1,
+  student_count: 40, required_room_type: "", fixed_room_id: "", priority: 1,
   student_group_ids: [],
 })
 const form = ref(blank())
+
+const roomsOfType = computed(() =>
+  rooms.value.filter((r) => r.room_type === form.value.required_room_type)
+)
 
 // Groups filtered to match the selected semester + year (convenience filter)
 const relevantGroups = computed(() => {
@@ -64,16 +70,18 @@ const groupedView = computed(() => {
 async function loadData() {
   loading.value = true
   try {
-    const [courseRes, deptRes, lecRes, grpRes] = await Promise.all([
+    const [courseRes, deptRes, lecRes, grpRes, roomRes] = await Promise.all([
       resourcesApi.courses({ semester: yearStore.currentSemester }),
       resourcesApi.departments(),
       resourcesApi.lecturers(),
       resourcesApi.studentGroups(),
+      resourcesApi.rooms(),
     ])
     courses.value       = courseRes.data.data || []
     departments.value   = deptRes.data.data   || []
     lecturers.value     = lecRes.data.data     || []
     studentGroups.value = grpRes.data.data     || []
+    rooms.value          = roomRes.data.data   || []
   } catch (e) {
     toast.error(getErrorMessage(e, "Failed to load data."))
   } finally {
@@ -104,7 +112,8 @@ function openEdit(c) {
     lecturer_id: c.lecturer?.id || "",
     semester: c.semester, year_of_study: c.year_of_study,
     weekly_hours: c.weekly_hours, student_count: c.student_count,
-    requires_lab: c.requires_lab || false, priority: c.priority || 1,
+    required_room_type: c.required_room_type || "", fixed_room_id: c.fixed_room_id || "",
+    priority: c.priority || 1,
     student_group_ids: (c.student_group_ids || []).slice(),
   }
   showForm.value = true
@@ -338,11 +347,21 @@ onMounted(loadData)
           <label class="label">Priority (1–5)</label>
           <input v-model.number="form.priority" type="number" min="1" max="5" class="input" />
         </div>
-        <div class="flex items-center">
-          <label class="flex items-center gap-2.5 text-sm cursor-pointer select-none mt-5">
-            <input v-model="form.requires_lab" type="checkbox" class="w-4 h-4 rounded accent-blue-600" />
-            <span class="text-gray-700">Requires a lab room</span>
-          </label>
+        <div>
+          <label class="label">Required Room Type</label>
+          <select v-model="form.required_room_type" class="input" @change="form.fixed_room_id = ''">
+            <option value="">No specific requirement</option>
+            <option v-for="t in ROOM_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
+          </select>
+        </div>
+        <div v-if="form.required_room_type">
+          <label class="label">Fixed Room <span class="text-xs text-gray-400 font-normal">(optional — pins every session to this exact room)</span></label>
+          <select v-model="form.fixed_room_id" class="input">
+            <option value="">Any room of this type</option>
+            <option v-for="r in roomsOfType" :key="r.id" :value="r.id">
+              {{ r.name }} ({{ r.code }}){{ r.building_detail ? ` — ${r.building_detail.name}` : "" }}
+            </option>
+          </select>
         </div>
       </div>
 
@@ -497,7 +516,12 @@ onMounted(loadData)
             <p class="font-semibold text-gray-900">{{ c.code }}</p>
             <span class="text-gray-400">·</span>
             <p class="text-gray-700 truncate">{{ c.name }}</p>
-            <span v-if="c.requires_lab" class="px-1.5 py-0.5 rounded text-xs bg-purple-100 text-purple-700 font-medium">Lab</span>
+            <span v-if="c.required_room_type" class="px-1.5 py-0.5 rounded text-xs bg-purple-100 text-purple-700 font-medium">
+              {{ ROOM_TYPES.find(t => t.value === c.required_room_type)?.label || c.required_room_type }}
+            </span>
+            <span v-if="c.fixed_room" class="px-1.5 py-0.5 rounded text-xs bg-pink-100 text-pink-700 font-medium">
+              Fixed: {{ c.fixed_room.name }}
+            </span>
             <span v-if="!c.lecturer" class="px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-700 font-medium">Unassigned</span>
           </div>
           <div class="flex items-center gap-3 text-xs text-gray-500 mt-0.5 flex-wrap">

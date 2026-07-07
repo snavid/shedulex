@@ -41,6 +41,7 @@ def generate():
             academic_year_id=body.get("academic_year_id"),
             config_overrides=body.get("ga_config"),
             student_group_ids=body.get("student_group_ids") or None,
+            building_id=body.get("building_id") or None,
         )
     except (ValueError, RuntimeError) as e:
         return fail(str(e), status=400)

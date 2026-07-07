@@ -33,6 +33,7 @@ def initialize_population(
     external_bookings: dict | None = None,
     generating_department_id: str | None = None,
     constraint_index: ConstraintIndex | None = None,
+    building_id: str | None = None,
 ) -> list[Chromosome]:
     """
     courses:  list of dicts with keys id, weekly_hours, requires_lab, lecturer_id, priority
@@ -73,7 +74,7 @@ def initialize_population(
     if not schedulable_slots:
         schedulable_slots = [s for s in slots if not s.get("is_break", False)] or slots
 
-    sorted_courses = sorted(courses, key=lambda c: c.get("priority", 1), reverse=True)
+    sorted_courses = sorted(courses, key=lambda c: c.get("priority") or 1, reverse=True)
 
     def _lec_preferred_slots(lec_id: str, course_id: str = "") -> list[dict]:
         """Return slot subset matching lecturer availability + DB blocked slots."""
@@ -137,8 +138,19 @@ def initialize_population(
             unit_dept = unit.get("department_id") or dept_id
             fixed_slot = idx.fixed_session(course_id)
 
-            if unit.get("requires_lab") and lab_rooms:
-                room_pool = lab_rooms
+            fixed_room_id = unit.get("fixed_room_id")
+            required_type = unit.get("required_room_type")
+
+            if fixed_room_id:
+                # Unrestricted, raw room list — guaranteed to contain the fixed
+                # room regardless of department/type pre-filtering, so the
+                # eligible_ids intersection below can never wipe it out.
+                room_pool = rooms
+            elif required_type == "lab" or unit.get("requires_lab"):
+                room_pool = lab_rooms if lab_rooms else all_rooms
+            elif required_type:
+                typed_rooms = [r for r in all_rooms if r.get("room_type") == required_type]
+                room_pool = typed_rooms if typed_rooms else all_rooms
             elif non_lab_rooms:
                 room_pool = non_lab_rooms
             else:
@@ -177,14 +189,16 @@ def initialize_population(
                 eligible_ids = idx.eligible_room_ids_for_gene(
                     rooms, unit_dept,
                     requires_lab=bool(unit.get("requires_lab")),
+                    required_room_type=required_type,
+                    fixed_room_id=fixed_room_id,
+                    building_id=building_id,
                     slot_id=slot_id_chosen,
                     room_busy_slots=room_busy_slots,
                 )
                 eligible_in_pool = [r for r in room_pool if r["id"] in eligible_ids]
-                pick_from = eligible_in_pool if eligible_in_pool else [
-                    r for r in room_pool if r["id"] in eligible_ids
-                ]
-                if not pick_from:
+                if eligible_in_pool:
+                    pick_from = eligible_in_pool
+                else:
                     pick_from = [r for r in all_rooms if r["id"] in eligible_ids] or room_pool
                 chosen_room = random.choice(pick_from)
 

@@ -136,6 +136,11 @@ export const resourcesApi = {
   createDepartment: (data) => api.post("/departments", data),
   updateDepartment: (id, data) => api.put(`/departments/${id}`, data),
   deleteDepartment: (id) => api.delete(`/departments/${id}`),
+  // Buildings
+  buildings: (params) => api.get("/buildings", { params }),
+  createBuilding: (data) => api.post("/buildings", data),
+  updateBuilding: (id, data) => api.put(`/buildings/${id}`, data),
+  deleteBuilding: (id) => api.delete(`/buildings/${id}`),
   // Rooms
   rooms: () => api.get("/rooms"),
   createRoom: (data) => api.post("/rooms", data),

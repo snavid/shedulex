@@ -2,12 +2,13 @@
 Lecturers, Courses, TimeSlots, TimetableTemplates, and Constraints."""
 from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.extensions import db
 import datetime as _dt
 from app.models.domain import (
-    AcademicYear, Constraint, Course, CourseGroupLecturer, Department, Lecturer, Program,
+    AcademicYear, Building, Constraint, Course, CourseGroupLecturer, Department, Lecturer, Program,
     Room, StudentGroup, TimeSlot, TimetableTemplate, TemplateTimeBlock,
     TimetableEntry, University, course_student_groups,
 )
@@ -19,6 +20,12 @@ from app.utils.responses import fail, json_body, ok
 resources_bp = Blueprint("resources", __name__, url_prefix="/api/v1")
 
 WRITE_ROLES = ("admin", "timetable_officer", "hod")
+
+
+@resources_bp.errorhandler(IntegrityError)
+def handle_integrity_error(exc):
+    db.session.rollback()
+    return fail("A record with a conflicting unique value already exists (e.g. duplicate code).", status=409)
 
 
 def _create(instance):
@@ -55,9 +62,18 @@ def _check_template_access(template: TimetableTemplate):
     return None
 
 
+# Fields that must never be mass-assigned via a generic update — identity,
+# audit timestamp, and tenant boundary (e.g. Room.university_id) are only
+# ever meant to be set at creation time, never overwritten via an unrelated
+# field edit.
+_PROTECTED_FIELDS = {"id", "created_at", "university_id"}
+
+
 def _dynamic_update(instance, payload: dict):
     """Keep legacy behavior: apply any attribute present on the model instance."""
     for key, value in payload.items():
+        if key in _PROTECTED_FIELDS:
+            continue
         if hasattr(instance, key):
             # Empty-string FK fields must become NULL, not a zero-length string
             # that violates the foreign-key constraint.
@@ -389,6 +405,52 @@ def delete_department(dept_id):
     return ok(message="Deleted.")
 
 
+# Buildings
+@resources_bp.get("/buildings")
+@service_or_jwt_required()
+def list_buildings():
+    if is_internal_request():
+        uni_id = request.args.get("university_id")
+    else:
+        uni_id = get_jwt_university_id()
+        if not uni_id:
+            return ok(data=[])
+    query = Building.query
+    if uni_id:
+        query = query.filter_by(university_id=uni_id)
+    return ok(data=[b.to_dict() for b in query.all()])
+
+
+@resources_bp.post("/buildings")
+@service_or_jwt_required(*WRITE_ROLES)
+def create_building():
+    body = json_body()
+    building = Building(
+        name=body["name"],
+        code=body.get("code"),
+        address=body.get("address"),
+        university_id=body.get("university_id"),
+    )
+    _create(building)
+    return ok(data=building.to_dict(), status=201)
+
+
+@resources_bp.put("/buildings/<building_id>")
+@service_or_jwt_required(*WRITE_ROLES)
+def update_building(building_id):
+    building = Building.query.get_or_404(building_id)
+    _update(building, json_body(), ("name", "code", "address", "university_id"))
+    return ok(data=building.to_dict())
+
+
+@resources_bp.delete("/buildings/<building_id>")
+@service_or_jwt_required(*WRITE_ROLES)
+def delete_building(building_id):
+    building = Building.query.get_or_404(building_id)
+    _delete(building)
+    return ok(message="Deleted.")
+
+
 # Rooms
 @resources_bp.get("/rooms")
 @service_or_jwt_required()
@@ -410,6 +472,8 @@ def list_rooms():
 def create_room():
     body = json_body()
     room = Room(**{k: body[k] for k in body if k in Room.__table__.columns.keys()})
+    if room.building_id == "":
+        room.building_id = None
     _create(room)
     return ok(data=room.to_dict(), status=201)
 
@@ -418,7 +482,16 @@ def create_room():
 @service_or_jwt_required(*WRITE_ROLES)
 def update_room(room_id):
     room = Room.query.get_or_404(room_id)
-    _dynamic_update(room, json_body())
+    body = json_body()
+    if body.get("is_available") is False and room.is_available:
+        pinned = Course.query.filter_by(fixed_room_id=room_id, is_active=True).all()
+        if pinned:
+            codes = ", ".join(c.code for c in pinned)
+            return fail(
+                f"Cannot deactivate: still the fixed room for {codes}. Unpin these courses first.",
+                status=409,
+            )
+    _dynamic_update(room, body)
     return ok(data=room.to_dict())
 
 
@@ -538,14 +611,46 @@ def create_course():
     allowed = {
         "name", "code", "department_id", "program_id", "lecturer_id",
         "semester", "year_of_study", "credit_hours", "weekly_hours",
-        "student_count", "requires_lab", "course_type", "priority",
+        "student_count", "requires_lab", "required_room_type", "fixed_room_id",
+        "course_type", "priority",
     }
     data = {k: body[k] for k in body if k in allowed}
     # Empty-string FK values (e.g. from a <select> with default "") must be
     # stored as NULL rather than an empty string that violates the FK constraint.
-    for fk in ("department_id", "program_id", "lecturer_id"):
+    for fk in ("department_id", "program_id", "lecturer_id", "fixed_room_id"):
         if data.get(fk) == "":
             data[fk] = None
+
+    # priority=None (explicit null, or simply omitted) must not reach the GA's
+    # sort key as None — that raises TypeError and aborts the whole run.
+    if data.get("priority") is None:
+        data["priority"] = 1
+    elif not isinstance(data["priority"], int) or data["priority"] < 1:
+        return fail("priority must be a positive integer.", status=422)
+
+    if "weekly_hours" in data and (data["weekly_hours"] is None or data["weekly_hours"] < 1):
+        return fail("weekly_hours must be at least 1.", status=422)
+
+    fixed_room_id = data.get("fixed_room_id")
+    if fixed_room_id:
+        room = Room.query.get(fixed_room_id)
+        if not room:
+            return fail("fixed_room_id does not reference an existing room.", status=422)
+        if data.get("required_room_type"):
+            if room.room_type != data["required_room_type"]:
+                return fail(
+                    f"fixed_room_id points to a '{room.room_type}' room, which doesn't match "
+                    f"required_room_type '{data['required_room_type']}'.",
+                    status=422,
+                )
+        else:
+            # No explicit type given — infer it from the pinned room so the
+            # two fields can never silently disagree.
+            data["required_room_type"] = room.room_type
+
+    # Keep the legacy boolean in sync so any other code path still reading it works.
+    if "required_room_type" in data:
+        data["requires_lab"] = (data["required_room_type"] == "lab")
     course = Course(**data)
     _create(course)
     return ok(data=course.to_dict(), status=201)
@@ -555,7 +660,44 @@ def create_course():
 @service_or_jwt_required(*WRITE_ROLES)
 def update_course(course_id):
     course = Course.query.get_or_404(course_id)
-    _dynamic_update(course, json_body())
+    body = json_body()
+
+    def _effective(key, current):
+        if key not in body:
+            return current
+        value = body[key]
+        if value == "" and key.endswith("_id"):
+            return None
+        return value
+
+    if "priority" in body:
+        if body["priority"] is None:
+            body["priority"] = 1
+        elif not isinstance(body["priority"], int) or body["priority"] < 1:
+            return fail("priority must be a positive integer.", status=422)
+
+    if "weekly_hours" in body and (body["weekly_hours"] is None or body["weekly_hours"] < 1):
+        return fail("weekly_hours must be at least 1.", status=422)
+
+    effective_fixed_room_id = _effective("fixed_room_id", course.fixed_room_id)
+    effective_required_type = _effective("required_room_type", course.required_room_type)
+    if effective_fixed_room_id:
+        room = Room.query.get(effective_fixed_room_id)
+        if not room:
+            return fail("fixed_room_id does not reference an existing room.", status=422)
+        if effective_required_type:
+            if room.room_type != effective_required_type:
+                return fail(
+                    f"fixed_room_id points to a '{room.room_type}' room, which doesn't match "
+                    f"required_room_type '{effective_required_type}'.",
+                    status=422,
+                )
+        elif "required_room_type" not in body:
+            body["required_room_type"] = room.room_type
+
+    if "required_room_type" in body:
+        body["requires_lab"] = (body["required_room_type"] == "lab")
+    _dynamic_update(course, body)
     return ok(data=course.to_dict())
 
 

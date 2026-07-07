@@ -2,18 +2,20 @@
 import { onMounted, ref, computed } from "vue"
 import { resourcesApi, getErrorMessage } from "@/api/client"
 import { useToast } from "vue-toastification"
+import { ROOM_TYPES } from "@/constants/roomTypes"
 
 const toast = useToast()
 const loading = ref(true)
 const saving = ref(false)
 const rooms = ref([])
+const buildings = ref([])
 const showForm = ref(false)
 const editTarget = ref(null)
 const deleteTarget = ref(null)
 const search = ref("")
 const typeFilter = ref("")
 
-const blank = () => ({ name: "", code: "", capacity: 40, room_type: "lecture", building: "", floor: 1 })
+const blank = () => ({ name: "", code: "", capacity: 40, room_type: "lecture", building_id: "", floor: 1 })
 const form = ref(blank())
 
 const TYPE_COLORS = {
@@ -21,21 +23,27 @@ const TYPE_COLORS = {
   lab: { bg: "bg-purple-100", text: "text-purple-700", label: "Lab" },
   seminar: { bg: "bg-teal-100", text: "text-teal-700", label: "Seminar" },
   auditorium: { bg: "bg-orange-100", text: "text-orange-700", label: "Auditorium" },
+  science_lab: { bg: "bg-green-100", text: "text-green-700", label: "Science Lab" },
+  main_hall: { bg: "bg-pink-100", text: "text-pink-700", label: "Main Hall" },
 }
 
 const filtered = computed(() => {
   let list = rooms.value
   if (typeFilter.value) list = list.filter((r) => r.room_type === typeFilter.value)
   const q = search.value.toLowerCase()
-  if (q) list = list.filter((r) => r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q) || (r.building || "").toLowerCase().includes(q))
+  if (q) list = list.filter((r) => r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q) || (r.building_detail?.name || r.building || "").toLowerCase().includes(q))
   return list
 })
 
 async function load() {
   loading.value = true
   try {
-    const { data } = await resourcesApi.rooms()
-    rooms.value = data.data || []
+    const [roomsRes, buildingsRes] = await Promise.all([
+      resourcesApi.rooms(),
+      resourcesApi.buildings(),
+    ])
+    rooms.value = roomsRes.data.data || []
+    buildings.value = buildingsRes.data.data || []
   } catch (e) {
     toast.error(getErrorMessage(e, "Failed to load rooms."))
   } finally {
@@ -52,7 +60,7 @@ function openCreate() {
 
 function openEdit(r) {
   editTarget.value = r
-  form.value = { name: r.name, code: r.code, capacity: r.capacity, room_type: r.room_type, building: r.building || "", floor: r.floor || 1 }
+  form.value = { name: r.name, code: r.code, capacity: r.capacity, room_type: r.room_type, building_id: r.building_id || "", floor: r.floor || 1 }
   showForm.value = true
   deleteTarget.value = null
 }
@@ -137,10 +145,7 @@ onMounted(load)
         <div>
           <label class="label">Type</label>
           <select v-model="form.room_type" class="input">
-            <option value="lecture">Lecture Hall</option>
-            <option value="lab">Computer Lab</option>
-            <option value="seminar">Seminar Room</option>
-            <option value="auditorium">Auditorium</option>
+            <option v-for="t in ROOM_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
           </select>
         </div>
         <div>
@@ -153,7 +158,10 @@ onMounted(load)
         </div>
         <div class="md:col-span-3">
           <label class="label">Building</label>
-          <input v-model="form.building" class="input" placeholder="Main Block" />
+          <select v-model="form.building_id" class="input">
+            <option value="">No building</option>
+            <option v-for="b in buildings" :key="b.id" :value="b.id">{{ b.name }}</option>
+          </select>
         </div>
       </div>
       <div class="flex gap-2">
@@ -179,10 +187,7 @@ onMounted(load)
       <input v-model="search" class="input flex-1 min-w-[180px] max-w-xs" placeholder="Search rooms…" />
       <select v-model="typeFilter" class="input w-auto">
         <option value="">All types</option>
-        <option value="lecture">Lecture</option>
-        <option value="lab">Lab</option>
-        <option value="seminar">Seminar</option>
-        <option value="auditorium">Auditorium</option>
+        <option v-for="t in ROOM_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
       </select>
     </div>
 
@@ -260,7 +265,7 @@ onMounted(load)
             {{ (TYPE_COLORS[r.room_type] || TYPE_COLORS.lecture).label }}
           </span>
           <span class="text-xs text-gray-500">Cap. {{ r.capacity }}</span>
-          <span v-if="r.building" class="text-xs text-gray-400">· {{ r.building }}<span v-if="r.floor">, Fl. {{ r.floor }}</span></span>
+          <span v-if="r.building_detail?.name || r.building" class="text-xs text-gray-400">· {{ r.building_detail?.name || r.building }}<span v-if="r.floor">, Fl. {{ r.floor }}</span></span>
         </div>
       </div>
     </div>

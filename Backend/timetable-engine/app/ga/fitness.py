@@ -190,8 +190,11 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
             if room.get("capacity", 0) < course.get("student_count", 0):
                 penalty += HARD_PENALTY
 
-        # H4 – Lab requirement
-        if course.get("requires_lab") and room.get("room_type") != "lab":
+        # H4 – Required room type (generalizes the old lab-only check to any
+        # required_room_type: science_lab, main_hall, etc. — falls back to the
+        # legacy requires_lab boolean when no specific type is set).
+        req_type = course.get("required_room_type") or ("lab" if course.get("requires_lab") else None)
+        if req_type and room.get("room_type") != req_type:
             penalty += HARD_PENALTY
 
         # H5 – Lecturer availability (day-level from availability dict)
@@ -336,8 +339,8 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
             idx_b, sid_b = ordered[i]
             if idx_b != idx_a + 1:
                 continue
-            bldg_a = rooms.get(slot_room_for_actor.get((sid_a, lec_id), ""), {}).get("building")
-            bldg_b = rooms.get(slot_room_for_actor.get((sid_b, lec_id), ""), {}).get("building")
+            bldg_a = rooms.get(slot_room_for_actor.get((sid_a, lec_id), ""), {}).get("building_id")
+            bldg_b = rooms.get(slot_room_for_actor.get((sid_b, lec_id), ""), {}).get("building_id")
             if bldg_a and bldg_b and bldg_a != bldg_b:
                 penalty += SOFT_WEIGHTS["travel"]
 
@@ -356,8 +359,8 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
             idx_b, sid_b = ordered[i]
             if idx_b != idx_a + 1:
                 continue
-            bldg_a = rooms.get(slot_room_for_actor.get((sid_a, grp_id), ""), {}).get("building")
-            bldg_b = rooms.get(slot_room_for_actor.get((sid_b, grp_id), ""), {}).get("building")
+            bldg_a = rooms.get(slot_room_for_actor.get((sid_a, grp_id), ""), {}).get("building_id")
+            bldg_b = rooms.get(slot_room_for_actor.get((sid_b, grp_id), ""), {}).get("building_id")
             if bldg_a and bldg_b and bldg_a != bldg_b:
                 penalty += SOFT_WEIGHTS["travel"]
 
@@ -595,11 +598,12 @@ def violation_report(chromosome: Chromosome, context: dict) -> list[dict]:
                                f"{room.get('name')} (capacity {cap})",
                 })
 
-        if course.get("requires_lab") and room.get("room_type") != "lab":
+        req_type_vr = course.get("required_room_type") or ("lab" if course.get("requires_lab") else None)
+        if req_type_vr and room.get("room_type") != req_type_vr:
             violations.append({
                 "severity": "high", "category": "room",
-                "rule": "H4 — Lab room required",
-                "message": f"{course.get('name')} requires a lab but is in "
+                "rule": "H4 — Required room type",
+                "message": f"{course.get('name')} requires a '{req_type_vr}' room but is in "
                            f"{room.get('name')} ({room.get('room_type')})",
             })
 

@@ -162,6 +162,7 @@ services:
       CALENDAR_SERVICE_URL: http://calendar-service:5005
       TIMETABLE_NOTIFY_ENABLED: ${TIMETABLE_NOTIFY_ENABLED:-true}
       AUDIT_SERVICE_URL: http://audit-service:5008
+      GA_TIMEOUT_SECONDS: ${GA_TIMEOUT_SECONDS:-120}
     networks:
       - shedulex-net
     restart: unless-stopped
