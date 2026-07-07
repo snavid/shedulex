@@ -72,6 +72,7 @@ services:
           - /api/v1/portal/session
         methods:
           - POST
+          - OPTIONS
         strip_path: false
     plugins:
       - name: rate-limiting
