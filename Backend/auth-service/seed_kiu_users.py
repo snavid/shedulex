@@ -73,12 +73,15 @@ def _slugify(name: str) -> str:
     return "".join(ch for ch in slug if ch.isalnum() or ch == " ").strip().replace(" ", ".")
 
 
-def _get_or_skip_user(email: str, **fields) -> tuple["User | None", bool]:
-    """Create a User if the email doesn't already exist. Never overwrites."""
+def _get_or_skip_user(email: str, password: str, **fields) -> tuple["User | None", bool]:
+    """Create a User if the email doesn't already exist. Never overwrites.
+    password_hash is NOT NULL at the DB level, so the password must be set
+    before the very first flush — never after, or the INSERT itself fails."""
     existing = User.query.filter_by(email=email).first()
     if existing:
         return existing, False
     user = User(email=email, **fields)
+    user.set_password(password)
     db.session.add(user)
     db.session.flush()
     return user, True
@@ -105,7 +108,7 @@ def seed():
                 continue
             email = f"{email_pfx}@{UNI_CODE}.shedulex.ac"
             user, was_created = _get_or_skip_user(
-                email,
+                email, pwd,
                 username=f"{uname_pfx}.{UNI_CODE}",
                 first_name=first, last_name=f"{last} (KIU)",
                 phone=f"+256700900{account_idx:03d}",
@@ -115,7 +118,6 @@ def seed():
                 is_verified=True, must_change_password=False,
             )
             if was_created:
-                user.set_password(pwd)
                 created += 1
         db.session.commit()
         print(f"Created {created} standard demo login(s) (existing ones left untouched).")
@@ -146,7 +148,7 @@ def seed():
             first_name = name_parts[0] if name_parts else lect["name"]
             last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else "Lecturer"
             user, was_created = _get_or_skip_user(
-                email,
+                email, "Lecturer@2026",
                 username=slug,
                 first_name=first_name, last_name=last_name,
                 phone=f"+256700800{phone_counter}",
@@ -156,7 +158,6 @@ def seed():
             )
             phone_counter += 1
             if was_created:
-                user.set_password("Lecturer@2026")
                 db.session.commit()
                 result = _timetable_patch(f"/api/v1/lecturers/{lect['id']}", {"user_id": user.id})
                 if result.get("success"):
