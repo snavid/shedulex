@@ -64,7 +64,7 @@ const filteredLecturers = computed(() =>
 
 const filteredCourses = computed(() =>
   deptFilter.value
-    ? courses.value.filter(c => c.department_id === deptFilter.value)
+    ? courses.value.filter(c => c.department?.id === deptFilter.value)
     : courses.value
 )
 

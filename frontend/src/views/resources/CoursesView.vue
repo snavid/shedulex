@@ -60,7 +60,7 @@ const viewMode = ref("list")
 
 const filtered = computed(() => {
   let list = courses.value
-  if (deptFilter.value) list = list.filter((c) => c.department_id === deptFilter.value)
+  if (deptFilter.value) list = list.filter((c) => c.department?.id === deptFilter.value)
   const q = search.value.toLowerCase()
   if (q) list = list.filter((c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q))
   return list
@@ -122,7 +122,7 @@ function openEdit(c) {
   editTarget.value = c
   form.value = {
     name: c.name, code: c.code,
-    department_id: c.department_id || "",
+    department_id: c.department?.id || "",
     lecturer_id: c.lecturer?.id || "",
     semester: c.semester, year_of_study: c.year_of_study,
     weekly_hours: c.weekly_hours, student_count: c.student_count,
