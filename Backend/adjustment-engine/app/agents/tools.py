@@ -166,27 +166,40 @@ def suggest_best_venue(student_count: int, requires_lab: bool = False) -> str:
 def move_timetable_entry(
     timetable_id: str,
     entry_id: str,
-    time_slot_id: str,
+    time_slot_id: str = "",
+    room_id: str = "",
     reason: str = "",
 ) -> str:
     """
-    Move one entry to a different time slot. Use when that slot is free for the
-    lecturer, room, and student group. Always provide a reason for the audit trail.
+    Move one entry to a different time slot and/or room. Provide room_id whenever the
+    conflict is about room capacity or room type — time_slot_id alone CANNOT change the
+    assigned room, so a too-small room can only be fixed by also passing room_id. At
+    least one of time_slot_id/room_id must be given. Always provide a reason for the
+    audit trail.
     """
+    if not time_slot_id and not room_id:
+        return "Move failed: provide at least one of time_slot_id or room_id."
     try:
         entries_data = _get(f"/api/v1/timetable/{timetable_id}")
         entries = (entries_data.get("data") or {}).get("entries", [])
         entry = next((e for e in entries if e.get("id") == entry_id), {})
 
-        _patch(f"/api/v1/timetable/entries/{entry_id}", {"time_slot_id": time_slot_id})
+        payload = {}
+        if time_slot_id:
+            payload["time_slot_id"] = time_slot_id
+        if room_id:
+            payload["room_id"] = room_id
+        _patch(f"/api/v1/timetable/entries/{entry_id}", payload)
 
-        course = entry.get("course")   or {}
-        lec    = entry.get("lecturer") or {}
-        old_ts = entry.get("time_slot") or {}
+        course   = entry.get("course")   or {}
+        lec      = entry.get("lecturer") or {}
+        old_ts   = entry.get("time_slot") or {}
+        old_room = entry.get("room") or {}
+        room_note = f" and room to {room_id}" if room_id else ""
         desc = (
             f"Sora AI moved {course.get('code', entry_id)} ({course.get('name', '')}) "
             f"from {old_ts.get('day','?')} {old_ts.get('start_time','?')} "
-            f"to slot {time_slot_id}. "
+            f"(room {old_room.get('code','?')}) to slot {time_slot_id or old_ts.get('id')}{room_note}. "
             f"Lecturer: {lec.get('name','?')}. "
             f"Reason: {reason or 'AI schedule optimisation'}."
         )
@@ -313,6 +326,69 @@ def substitute_lecturer(
         return f"Substitution failed: {e}"
 
 
+@tool
+def resolve_all_conflicts(timetable_id: str, reason: str = "") -> str:
+    """
+    Automatically re-optimize ALL currently-conflicting sessions in ONE shot using the
+    scheduling engine — including conflicts a single move/swap cannot fix (e.g. a room
+    that is too small for the class). Use this INSTEAD OF repeated move_timetable_entry
+    calls whenever the user asks to fix "all" conflicts, or whenever
+    detect_timetable_conflicts returns more than one conflict.
+    """
+    try:
+        result = _post(f"/api/v1/timetable/{timetable_id}/reschedule", {"reason": reason})
+        data = result.get("data") or {}
+        updated = data.get("updated") or []
+        desc = (
+            f"Sora AI auto-resolved {len(updated)} conflicting session(s) in timetable "
+            f"{timetable_id}. Reason: {reason or 'AI conflict resolution'}."
+        )
+        create_timetable_snapshot(timetable_id, desc, "Sora AI")
+        return f"Resolved successfully: {desc}"
+    except Exception as e:
+        return f"Conflict resolution failed: {e}"
+
+
+@tool
+def bulk_reschedule(
+    timetable_id: str,
+    program_id: str = "",
+    student_group_id: str = "",
+    department_id: str = "",
+    before_time: str = "",
+    after_time: str = "",
+    reason: str = "",
+) -> str:
+    """
+    Move MANY sessions at once to satisfy a criteria-based directive, e.g. "move all of
+    BCS Year 3 to mornings before 12:00" or "move everything in the CS department after
+    14:00". Provide program_id and/or student_group_id and/or department_id to select
+    WHICH sessions move, and before_time/after_time ("HH:MM", 24h) to constrain WHEN they
+    may land. Use this INSTEAD OF calling move_timetable_entry one-by-one for "all of X"
+    requests — it re-optimizes everything together in one engine call.
+    """
+    try:
+        payload = {"reason": reason}
+        for key, val in (("program_id", program_id), ("student_group_id", student_group_id),
+                         ("department_id", department_id), ("before_time", before_time),
+                         ("after_time", after_time)):
+            if val:
+                payload[key] = val
+        result = _post(f"/api/v1/timetable/{timetable_id}/reschedule", payload)
+        data = result.get("data") or {}
+        updated = data.get("updated") or []
+        desc = (
+            f"Sora AI bulk-rescheduled {len(updated)} session(s) in timetable {timetable_id} "
+            f"(program={program_id or '-'}, group={student_group_id or '-'}, "
+            f"dept={department_id or '-'}, before={before_time or '-'}, after={after_time or '-'}). "
+            f"Reason: {reason or 'AI bulk reschedule'}."
+        )
+        create_timetable_snapshot(timetable_id, desc, "Sora AI")
+        return f"Bulk reschedule successful: {desc}"
+    except Exception as e:
+        return f"Bulk reschedule failed: {e}"
+
+
 # ── Human-in-the-loop ─────────────────────────────────────────────────────────
 
 @tool
@@ -342,6 +418,8 @@ ALL_TOOLS = [
     suggest_best_venue,
     move_timetable_entry,
     swap_timetable_entries,
+    resolve_all_conflicts,
+    bulk_reschedule,
     get_available_lecturers,
     substitute_lecturer,
     ask_user,

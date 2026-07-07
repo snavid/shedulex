@@ -96,8 +96,10 @@ export const timetableApi = {
   violations: (id) => api.get(`/timetable/${id}/violations`),
   predictions: (id) => api.post(`/timetable/${id}/predict-conflicts`),
   swapEntries: (data) => api.post("/timetable/entries/swap", data),
-  moveEntry: (entryId, time_slot_id) =>
-    api.patch(`/timetable/entries/${entryId}`, { time_slot_id }),
+  moveEntry: (entryId, time_slot_id, room_id) =>
+    api.patch(`/timetable/entries/${entryId}`, { time_slot_id, room_id }),
+  rescheduleSubset: (timetableId, data) =>
+    api.post(`/timetable/${timetableId}/reschedule`, data),
   toggleLock: (timetableId, entryId) =>
     api.patch(`/timetable/${timetableId}/entries/${entryId}/lock`),
   substituteLecturer: (timetableId, data) =>

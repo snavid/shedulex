@@ -130,9 +130,10 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
     lecturers = context["lecturers"]
     db_constraints: list[dict] = context.get("db_constraints", [])
     constraint_index: ConstraintIndex = context.get("constraint_index") or ConstraintIndex(db_constraints)
-    _ext = context.get("external_bookings", {"room": {}, "lecturer": {}})
+    _ext = context.get("external_bookings", {"room": {}, "lecturer": {}, "student_group": {}})
     ext_room: dict = _ext.get("room", {})
     ext_lec:  dict = _ext.get("lecturer", {})
+    ext_grp:  dict = _ext.get("student_group", {})
 
     # ── Build lookup indices ──────────────────────────────────────────────────
     lec_slot_map:   dict[str, list[str]] = defaultdict(list)   # "{lec}:{slot}" → courses
@@ -165,6 +166,10 @@ def evaluate(chromosome: Chromosome, context: dict) -> float:
 
         # H11 – Lecturer booked by another active timetable (cross-department)
         if lec_id and (lec_id, slot_day, slot_start, slot_end) in ext_lec:
+            penalty += HARD_PENALTY
+
+        # H-ext-group – Student group booked by a FIXED (non-target) entry in a scoped reschedule
+        if grp_id and (grp_id, slot_day, slot_start, slot_end) in ext_grp:
             penalty += HARD_PENALTY
 
         # H1 – Lecturer double-booking
@@ -546,9 +551,10 @@ def violation_report(chromosome: Chromosome, context: dict) -> list[dict]:
     lecturers = context["lecturers"]
     db_constraints: list[dict] = context.get("db_constraints", [])
     constraint_index: ConstraintIndex = context.get("constraint_index") or ConstraintIndex(db_constraints)
-    _ext_vr    = context.get("external_bookings", {"room": {}, "lecturer": {}})
+    _ext_vr    = context.get("external_bookings", {"room": {}, "lecturer": {}, "student_group": {}})
     ext_room_vr: dict = _ext_vr.get("room", {})
     ext_lec_vr:  dict = _ext_vr.get("lecturer", {})
+    ext_grp_vr:  dict = _ext_vr.get("student_group", {})
 
     lec_slot_map:   dict[str, list] = defaultdict(list)
     room_slot_map:  dict[str, list] = defaultdict(list)
@@ -633,6 +639,20 @@ def violation_report(chromosome: Chromosome, context: dict) -> list[dict]:
                     "message": (
                         f"{other.get('lecturer_name', lec_id)} at {slot_label} is already assigned by "
                         f"{other['department_name']} ({other['course_name']})."
+                    ),
+                })
+
+        # H-ext-group – Student group booked by a FIXED (non-target) entry in a scoped reschedule
+        if grp_id:
+            hit = ext_grp_vr.get((grp_id, slot_day, slot_start_vr, slot_end_vr))
+            if hit:
+                other = hit[0]
+                violations.append({
+                    "severity": "high", "category": "student",
+                    "rule": "H-ext-group — Student group booked by a fixed session",
+                    "message": (
+                        f"Student group already has a fixed class at {slot_label} "
+                        f"({other['course_name']})."
                     ),
                 })
 

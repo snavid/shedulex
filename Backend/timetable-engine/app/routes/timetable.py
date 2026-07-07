@@ -131,19 +131,53 @@ def get_entry(entry_id):
 @timetable_bp.patch("/entries/<entry_id>")
 @service_or_jwt_required("admin", "timetable_officer")
 def move_entry(entry_id):
-    """Assign a single entry to a new time slot (no swap). Internal services may call via X-Internal-Service-Key."""
+    """Assign a single entry to a new time slot and/or room (no swap). Internal services may call via X-Internal-Service-Key."""
     body = json_body()
     slot_id = body.get("time_slot_id")
-    if not slot_id:
-        return fail("time_slot_id is required.", status=422)
+    room_id = body.get("room_id")
+    if not slot_id and not room_id:
+        return fail("time_slot_id or room_id is required.", status=422)
 
     try:
         actor = body.get("triggered_by") if is_internal_request() else get_jwt_identity()
-        entry = timetable_service.move_entry_to_slot(entry_id, slot_id, triggered_by=actor)
+        entry = timetable_service.move_entry_to_slot(entry_id, slot_id, room_id=room_id, triggered_by=actor)
     except ValueError as ex:
         return fail(str(ex), status=400)
 
     return ok(data=entry.to_dict())
+
+
+@timetable_bp.post("/<timetable_id>/reschedule")
+@service_or_jwt_required("admin", "timetable_officer")
+def reschedule(timetable_id):
+    """
+    Scoped GA re-optimization of a subset of this timetable's entries — either an
+    explicit list of target_entry_ids, a program/student_group/department filter,
+    or (if none given) every entry currently implicated by a conflict. Leaves every
+    other entry in the timetable untouched. Internal services may call via
+    X-Internal-Service-Key.
+    """
+    body = json_body()
+    try:
+        actor = body.get("triggered_by") if is_internal_request() else get_jwt_identity()
+        result = timetable_service.reschedule_subset(
+            timetable_id,
+            target_entry_ids=body.get("target_entry_ids"),
+            program_id=body.get("program_id"),
+            student_group_id=body.get("student_group_id"),
+            department_id=body.get("department_id"),
+            before_time=body.get("before_time"),
+            after_time=body.get("after_time"),
+            config_overrides=body.get("ga_config"),
+            triggered_by=actor,
+        )
+    except (ValueError, RuntimeError) as e:
+        return fail(str(e), status=400)
+
+    return ok(
+        data=result,
+        message=f"Rescheduled {len(result.get('updated', []))} session(s).",
+    )
 
 
 @timetable_bp.get("/entries")
