@@ -168,6 +168,7 @@ services:
         paths:
           - /api/v1/timetable
           - /api/v1/rooms
+          - /api/v1/buildings
           - /api/v1/lecturers
           - /api/v1/courses
           - /api/v1/constraints
@@ -315,6 +316,7 @@ plugins:
         - "http://localhost:5173"
         - "http://localhost:8080"
         - "https://shedulex.hudumatech.com"
+        - "https://freetimetable.hudumatech.com"
       methods:
         - GET
         - POST
