@@ -124,6 +124,7 @@ def mutate(
                 building_id=building_id,
                 slot_id=gene.time_slot_id,
                 room_busy_slots=room_busy,
+                min_capacity=course.get("student_count"),
             )
             if eligible:
                 gene.room_id = random.choice(eligible)
@@ -175,6 +176,7 @@ def mutate(
             building_id=building_id,
             slot_id=gene.time_slot_id,
             room_busy_slots=room_busy,
+            min_capacity=course.get("student_count"),
         )
         if eligible and gene.room_id not in eligible:
             gene.room_id = random.choice(eligible)

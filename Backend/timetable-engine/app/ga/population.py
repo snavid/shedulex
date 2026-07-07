@@ -194,6 +194,7 @@ def initialize_population(
                     building_id=building_id,
                     slot_id=slot_id_chosen,
                     room_busy_slots=room_busy_slots,
+                    min_capacity=unit.get("student_count"),
                 )
                 eligible_in_pool = [r for r in room_pool if r["id"] in eligible_ids]
                 if eligible_in_pool:

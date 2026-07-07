@@ -136,15 +136,23 @@ class ConstraintIndex:
         building_id: str | None = None,
         slot_id: str | None = None,
         room_busy_slots: dict[str, set[str]] | None = None,
+        min_capacity: int | None = None,
     ) -> list[str]:
         """Return room IDs eligible for mutation/init for one gene.
 
         Priority (highest first):
           1. fixed_room_id set -> always exactly that room (bypasses dept/building/
-             type/slot filtering entirely — the generator must obey this).
+             type/slot/capacity filtering entirely — the generator must obey this).
           2. required_room_type == 'lab' (mandatory computer lab) -> exempt from
              building_id scoping, since not every building has a computer lab.
           3. otherwise -> hard-scoped to building_id if given.
+
+        min_capacity narrows the pool to rooms big enough for the course's
+        student_count wherever at least one such room exists, so H3 (room
+        capacity) is steered around structurally instead of relying purely on
+        the fitness penalty to evolve away from an undersized room — that
+        penalty-only approach could keep landing on the same too-small room
+        indefinitely if it's otherwise the best/only match on type or building.
         """
         if fixed_room_id:
             return [fixed_room_id]
@@ -168,6 +176,11 @@ class ConstraintIndex:
             non_lab = [r for r in pool if r.get("room_type") != "lab"]
             if non_lab:
                 pool = non_lab
+
+        if min_capacity:
+            big_enough = [r for r in pool if r.get("capacity", 0) >= min_capacity]
+            if big_enough:
+                pool = big_enough
 
         if slot_id:
             free = [
