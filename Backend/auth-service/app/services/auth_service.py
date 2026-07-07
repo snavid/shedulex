@@ -185,6 +185,7 @@ def login_user(email: str, password: str) -> tuple[User, dict]:
         "email": user.email,
         "must_change_password": user.must_change_password,
         "university_id": str(user.university_id) if user.university_id else None,
+        "department_id": str(user.department_id) if user.department_id else None,
     }
     tokens = generate_tokens(user.id, extra_claims)
     _persist_session(user.id, tokens["access_token"])

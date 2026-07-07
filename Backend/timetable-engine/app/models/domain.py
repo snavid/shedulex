@@ -587,6 +587,56 @@ class TimetableComment(db.Model):
         return d
 
 
+class LecturerRequest(db.Model):
+    """
+    A lecturer's request to admin, gated by a two-tier approval chain:
+    pending_hod -> pending_admin -> approved | rejected (HOD can also reject
+    directly from pending_hod -> rejected, without ever reaching admin).
+    """
+    __tablename__ = "lecturer_requests"
+    __table_args__ = (
+        db.Index("ix_lecturer_requests_status", "status"),
+        db.Index("ix_lecturer_requests_department_id", "department_id"),
+        db.Index("ix_lecturer_requests_lecturer_user_id", "lecturer_user_id"),
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    lecturer_user_id = db.Column(db.String(36), nullable=False)  # auth-service User.id of requester
+    lecturer_name = db.Column(db.String(200))
+    department_id = db.Column(db.String(36), db.ForeignKey("departments.id"), nullable=False)
+    category = db.Column(db.String(30), nullable=False)  # schedule_change|substitution_leave|room_issue|other
+    message = db.Column(db.String(1000), nullable=False)
+    status = db.Column(db.String(20), default="pending_hod")  # pending_hod|pending_admin|approved|rejected
+    hod_decided_by = db.Column(db.String(36))
+    hod_decided_at = db.Column(db.DateTime(timezone=True))
+    hod_note = db.Column(db.String(500))
+    admin_decided_by = db.Column(db.String(36))
+    admin_decided_at = db.Column(db.DateTime(timezone=True))
+    admin_note = db.Column(db.String(500))
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    department = db.relationship("Department")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "lecturer_user_id": self.lecturer_user_id,
+            "lecturer_name": self.lecturer_name,
+            "department_id": self.department_id,
+            "department": self.department.to_dict() if self.department else None,
+            "category": self.category,
+            "message": self.message,
+            "status": self.status,
+            "hod_decided_by": self.hod_decided_by,
+            "hod_decided_at": self.hod_decided_at.isoformat() if self.hod_decided_at else None,
+            "hod_note": self.hod_note,
+            "admin_decided_by": self.admin_decided_by,
+            "admin_decided_at": self.admin_decided_at.isoformat() if self.admin_decided_at else None,
+            "admin_note": self.admin_note,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
 class Constraint(db.Model):
     """
     Structured scheduling constraint loaded into the GA fitness evaluator.

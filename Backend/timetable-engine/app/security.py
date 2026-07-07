@@ -22,6 +22,23 @@ def get_jwt_university_id() -> str | None:
         return None
 
 
+def get_optional_jwt_university_id() -> str | None:
+    """Best-effort JWT university_id — verifies a JWT if one is present, but never
+    raises. Used by endpoints that must serve both authenticated (tenant-scoped)
+    and anonymous (pre-login registration) callers."""
+    if is_internal_request():
+        return None
+    try:
+        verify_jwt_in_request(optional=True)
+    except Exception:
+        return None
+    try:
+        claims = get_jwt()
+        return claims.get("university_id") if claims else None
+    except Exception:
+        return None
+
+
 def portal_jwt_required(fn):
     """Require a valid portal JWT (portal=true claim)."""
 

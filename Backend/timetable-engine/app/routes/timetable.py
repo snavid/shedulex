@@ -1,5 +1,5 @@
 from flask import Blueprint, request
-from flask_jwt_extended import get_jwt_identity
+from flask_jwt_extended import get_jwt, get_jwt_identity
 from app.services import timetable_service
 from app.security import service_or_jwt_required, is_internal_request, get_jwt_university_id
 from app.utils.responses import fail, json_body, ok, require_fields
@@ -185,7 +185,17 @@ def reschedule(timetable_id):
 def list_entries():
     timetable_id = request.args.get("timetable_id")
     day = request.args.get("day")
-    entries = timetable_service.list_entries(timetable_id=timetable_id, day=day)
+    lecturer_id = request.args.get("lecturer_id")
+    department_id = request.args.get("department_id")
+
+    if not is_internal_request() and get_jwt().get("role") == "lecturer":
+        from app.models.domain import Lecturer
+        me = Lecturer.query.filter_by(user_id=get_jwt_identity(), is_active=True).first()
+        lecturer_id = me.id if me else "__none__"  # force empty result if no linked Lecturer row
+
+    entries = timetable_service.list_entries(
+        timetable_id=timetable_id, day=day, lecturer_id=lecturer_id, department_id=department_id,
+    )
     return ok(data=[e.to_dict() for e in entries])
 
 

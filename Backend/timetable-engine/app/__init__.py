@@ -17,11 +17,12 @@ def create_app(config_name: str = None) -> Flask:
     jwt.init_app(app)
     cors.init_app(app, resources={r"/api/*": {"origins": "*"}})
 
-    from app.routes import timetable_bp, resources_bp, portal_bp, admin_comments_bp
+    from app.routes import timetable_bp, resources_bp, portal_bp, admin_comments_bp, lecturer_requests_bp
     app.register_blueprint(timetable_bp)
     app.register_blueprint(resources_bp)
     app.register_blueprint(portal_bp)
     app.register_blueprint(admin_comments_bp)
+    app.register_blueprint(lecturer_requests_bp)
 
     @app.get("/health")
     def health():

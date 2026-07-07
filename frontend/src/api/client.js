@@ -100,6 +100,7 @@ export const timetableApi = {
     api.patch(`/timetable/entries/${entryId}`, { time_slot_id, room_id }),
   rescheduleSubset: (timetableId, data) =>
     api.post(`/timetable/${timetableId}/reschedule`, data),
+  entries: (params) => api.get("/timetable/entries", { params }),
   toggleLock: (timetableId, entryId) =>
     api.patch(`/timetable/${timetableId}/entries/${entryId}/lock`),
   substituteLecturer: (timetableId, data) =>
@@ -328,4 +329,20 @@ export const auditApi = {
   list: (params) => api.get("/audit/logs", { params }),
   userActivity: (userId) => api.get(`/audit/logs/user/${userId}`),
   stats: (params) => api.get("/audit/logs/stats", { params }),
+}
+
+export const lecturerApi = {
+  me: () => api.get("/lecturers/me"),
+  myLessons: (params) => api.get("/timetable/entries", { params }),
+  departmentTimetables: (departmentId) =>
+    api.get("/timetable/", { params: { department_id: departmentId, status: "active" } }),
+  entriesForTimetable: (timetableId) =>
+    api.get("/timetable/entries", { params: { timetable_id: timetableId } }),
+}
+
+export const requestsApi = {
+  list: (params) => api.get("/lecturer-requests/", { params }),
+  create: (data) => api.post("/lecturer-requests/", data),
+  hodDecide: (id, data) => api.patch(`/lecturer-requests/${id}/hod-decision`, data),
+  adminDecide: (id, data) => api.patch(`/lecturer-requests/${id}/admin-decision`, data),
 }

@@ -152,6 +152,13 @@ function Icon({ name, class: cls = "w-5 h-5" }) {
 }
 
 const navItems = computed(() => {
+  if (auth.userRole === "lecturer") {
+    return [
+      { to: "/lecturer", label: "My Portal", icon: "timetable" },
+      { to: "/profile",  label: "Profile",   icon: "users" },
+    ]
+  }
+
   const base = [
     { to: "/dashboard",              label: "Dashboard",      icon: "dashboard" },
     { to: "/timetable",              label: "Timetables",     icon: "timetable" },
@@ -177,11 +184,16 @@ const navItems = computed(() => {
     { section: "Administration" },
     { to: "/admin/users",  label: "Users",       icon: "users" },
     { to: "/admin/comments", label: "Comments",  icon: "notifications" },
+    { to: "/admin/requests", label: "Requests",  icon: "assignments" },
     { to: "/admin/audit",  label: "Audit Logs",  icon: "audit" },
   )
   else if (auth.userRole === "timetable_officer") base.push(
     { section: "Administration" },
     { to: "/admin/comments", label: "Comments", icon: "notifications" },
+  )
+  else if (auth.isHod) base.push(
+    { section: "Administration" },
+    { to: "/hod/requests", label: "Department Requests", icon: "notifications" },
   )
   const userRole = auth.userRole
   return base.filter((item) => !item.roles || item.roles.includes(userRole))

@@ -1118,7 +1118,12 @@ def get_violation_report(timetable_id: str) -> list[dict]:
     return recompute_violation_report(timetable_id, persist=True)
 
 
-def list_entries(timetable_id: str | None = None, day: str | None = None):
+def list_entries(
+    timetable_id: str | None = None,
+    day: str | None = None,
+    lecturer_id: str | None = None,
+    department_id: str | None = None,
+):
     q = (
         TimetableEntry.query
         .options(
@@ -1137,6 +1142,10 @@ def list_entries(timetable_id: str | None = None, day: str | None = None):
         q = q.filter(TimetableEntry.timetable_id == timetable_id)
     if day:
         q = q.filter(TimeSlot.day == day)
+    if lecturer_id:
+        q = q.filter(TimetableEntry.lecturer_id == lecturer_id)
+    if department_id:
+        q = q.filter(Timetable.department_id == department_id)
     return q.order_by(TimeSlot.slot_index.asc()).all()
 
 

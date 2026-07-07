@@ -12,6 +12,8 @@ export const useAuthStore = defineStore("auth", () => {
   const userRole = computed(() => user.value?.role?.name || null)
   const isAdmin = computed(() => userRole.value === "admin")
   const isTimetableOfficer = computed(() => ["admin", "timetable_officer"].includes(userRole.value))
+  const isLecturer = computed(() => userRole.value === "lecturer")
+  const isHod = computed(() => userRole.value === "hod")
 
   async function login(email, password) {
     const { data } = await authApi.login({ email, password })
@@ -55,5 +57,9 @@ export const useAuthStore = defineStore("auth", () => {
     return data.data
   }
 
-  return { user, accessToken, isAuthenticated, userRole, isAdmin, isTimetableOfficer, login, register, logout, fetchMe }
+  return {
+    user, accessToken, isAuthenticated, userRole,
+    isAdmin, isTimetableOfficer, isLecturer, isHod,
+    login, register, logout, fetchMe,
+  }
 })

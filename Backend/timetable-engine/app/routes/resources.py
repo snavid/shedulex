@@ -1,6 +1,7 @@
 """CRUD routes for Universities, Departments, Programs, StudentGroups, Rooms,
 Lecturers, Courses, TimeSlots, TimetableTemplates, and Constraints."""
 from flask import Blueprint, request
+from flask_jwt_extended import get_jwt_identity
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.extensions import db
@@ -10,7 +11,9 @@ from app.models.domain import (
     Room, StudentGroup, TimeSlot, TimetableTemplate, TemplateTimeBlock,
     TimetableEntry, University, course_student_groups,
 )
-from app.security import service_or_jwt_required, get_jwt_university_id, is_internal_request
+from app.security import (
+    service_or_jwt_required, get_jwt_university_id, get_optional_jwt_university_id, is_internal_request,
+)
 from app.utils.responses import fail, json_body, ok
 
 resources_bp = Blueprint("resources", __name__, url_prefix="/api/v1")
@@ -195,16 +198,15 @@ def delete_academic_year(year_id):
     return ok(message="Academic year archived.")
 
 
-# Programs
+# Programs — GET is public so the registration form can list them without a token
 @resources_bp.get("/programs")
-@service_or_jwt_required()
 def list_programs():
     department_id = request.args.get("department_id")
     if is_internal_request():
         uni_id = request.args.get("university_id")
     else:
-        uni_id = get_jwt_university_id()
-        if not uni_id:
+        uni_id = get_optional_jwt_university_id() or request.args.get("university_id")
+        if not uni_id and not department_id:
             return ok(data=[])
     query = Program.query.options(
         joinedload(Program.department).joinedload(Department.university)
@@ -274,8 +276,8 @@ def remove_lecturer_from_program(prog_id, lec_id):
 
 
 # Student Groups
+# Student Groups — GET is public so the registration form can list them without a token
 @resources_bp.get("/student-groups")
-@service_or_jwt_required()
 def list_student_groups():
     program_id = request.args.get("program_id")
     year = request.args.get("year_of_study", type=int)
@@ -283,8 +285,8 @@ def list_student_groups():
     if is_internal_request():
         uni_id = request.args.get("university_id")
     else:
-        uni_id = get_jwt_university_id()
-        if not uni_id:
+        uni_id = get_optional_jwt_university_id() or request.args.get("university_id")
+        if not uni_id and not program_id:
             return ok(data=[])
     query = StudentGroup.query.options(
         joinedload(StudentGroup.program)
@@ -341,14 +343,13 @@ def delete_student_group(group_id):
     return ok(message="Student group deactivated.")
 
 
-# Departments
+# Departments — GET is public so the registration form can list them without a token
 @resources_bp.get("/departments")
-@service_or_jwt_required()
 def list_departments():
     if is_internal_request():
         uni_id = request.args.get("university_id")
     else:
-        uni_id = get_jwt_university_id()
+        uni_id = get_optional_jwt_university_id() or request.args.get("university_id")
         if not uni_id:
             return ok(data=[])
     query = Department.query.options(joinedload(Department.university))
@@ -443,6 +444,19 @@ def list_lecturers():
     if uni_id:
         query = query.join(Lecturer.department).filter(Department.university_id == uni_id)
     return ok(data=[l.to_dict() for l in query.all()])
+
+
+@resources_bp.get("/lecturers/me")
+@service_or_jwt_required()
+def get_my_lecturer_profile():
+    lecturer = (
+        Lecturer.query.options(joinedload(Lecturer.department))
+        .filter_by(user_id=get_jwt_identity(), is_active=True)
+        .first()
+    )
+    if not lecturer:
+        return fail("No lecturer profile linked to this account.", status=404)
+    return ok(data=lecturer.to_dict())
 
 
 @resources_bp.post("/lecturers")

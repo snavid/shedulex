@@ -52,11 +52,20 @@ async function loadData() {
     pendingUsers.value = pendingRes.data.data || []
     roles.value = rolesRes.data.data || []
     await loadUniversityCode()
+    await loadDepartments()
   } catch (e) {
     toast.error(getErrorMessage(e, "Failed to load users."))
   } finally {
     loading.value = false
   }
+}
+
+async function loadDepartments() {
+  if (!auth.user?.university_id || departments.value.length) return
+  try {
+    const { data } = await resourcesApi.departments({ university_id: auth.user.university_id })
+    departments.value = data.data || []
+  } catch {}
 }
 
 async function loadUniversityCode() {
@@ -103,11 +112,7 @@ function openAddStudentModal() {
     student_group_id: "",
   }
   showAddStudentModal.value = true
-  if (auth.user?.university_id && !departments.value.length) {
-    resourcesApi.departments({ university_id: auth.user.university_id })
-      .then(({ data }) => { departments.value = data.data || [] })
-      .catch(() => {})
-  }
+  loadDepartments()
 }
 
 function closeAddStudentModal() {
@@ -181,6 +186,16 @@ async function updateRole(userId, roleName) {
     await loadData()
   } catch (e) {
     toast.error(getErrorMessage(e, "Failed to update role."))
+  }
+}
+
+async function updateDepartment(userId, departmentId) {
+  try {
+    await usersApi.update(userId, { department_id: departmentId || null })
+    toast.success("Department updated.")
+    await loadData()
+  } catch (e) {
+    toast.error(getErrorMessage(e, "Failed to update department."))
   }
 }
 
@@ -418,6 +433,15 @@ onMounted(loadData)
               @change="updateRole(u.id, $event.target.value)"
             >
               <option v-for="r in roles" :key="r.id" :value="r.name">{{ r.name }}</option>
+            </select>
+            <select
+              v-if="u.role?.name === 'hod'"
+              class="input !w-auto text-sm py-1.5"
+              :value="u.department_id"
+              @change="updateDepartment(u.id, $event.target.value)"
+            >
+              <option value="">— No department —</option>
+              <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
             </select>
             <button class="btn-secondary text-sm py-1.5" @click="toggleUser(u.id)">
               {{ u.is_active ? "Deactivate" : "Activate" }}
