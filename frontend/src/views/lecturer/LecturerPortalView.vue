@@ -79,7 +79,7 @@ async function loadDepartmentTimetable() {
       const { data } = await lecturerApi.me()
       myLecturer.value = data.data
     }
-    const deptId = myLecturer.value?.department_id
+    const deptId = myLecturer.value?.department?.id
     if (!deptId) {
       toast.error("No department found on your lecturer profile.")
       return
