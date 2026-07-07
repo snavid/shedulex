@@ -41,38 +41,19 @@ def get_or_create(model, lookup_fields, **extra):
 
 # ── Faculties (Department.faculty is a plain label, not its own table) ────────
 FAC_COMPUTING = "Faculty of Computing, Management and Social Sciences"
-FAC_HEALTH = "Faculty of Health Sciences"
-FAC_LAW = "Faculty of Law"
-FAC_EDUCATION = "Faculty of Education"
 
 # ── Departments: code -> (name, faculty, lecturer_count) ──────────────────────
+# Deliberately just these four — KIU was pared down from an earlier, much
+# broader multi-faculty draft to a tighter, richly-populated set.
 DEPARTMENTS = {
-    "CIT": ("Department of Computing and Information Technology", FAC_COMPUTING, 8),
-    "BUS": ("Department of Business and Management", FAC_COMPUTING, 6),
-    "SOC": ("Department of Social Sciences and Social Work", FAC_COMPUTING, 4),
-    "PAD": ("Department of Public Administration", FAC_COMPUTING, 3),
-    "MAT": ("Department of Mathematics and Statistics", FAC_COMPUTING, 3),
-    "CLM": ("Department of Clinical Medicine", FAC_HEALTH, 5),
-    "PHS": ("Department of Pharmaceutical Sciences", FAC_HEALTH, 4),
-    "MLS": ("Department of Medical Laboratory Sciences", FAC_HEALTH, 4),
-    "NUR": ("Department of Nursing", FAC_HEALTH, 4),
-    "ANA": ("Department of Human Anatomy", FAC_HEALTH, 3),
-    "PHY": ("Department of Physiology", FAC_HEALTH, 3),
-    "PAT": ("Department of Pathology", FAC_HEALTH, 3),
-    "COM": ("Department of Community Medicine", FAC_HEALTH, 2),
-    "SUR": ("Department of Surgery", FAC_HEALTH, 3),
-    "PED": ("Department of Pediatrics and Obstetrics & Gynaecology", FAC_HEALTH, 3),
-    "LAW": ("Department of Legal Studies", FAC_LAW, 4),
-    "ARE": ("Department of Arts with Education", FAC_EDUCATION, 2),
-    "SCE": ("Department of Science with Education", FAC_EDUCATION, 2),
+    "CIT": ("Department of Computing and Information Technology", FAC_COMPUTING, 14),
+    "BUS": ("Department of Business and Management", FAC_COMPUTING, 12),
+    "PAD": ("Department of Public Administration", FAC_COMPUTING, 8),
+    "SOC": ("Department of Social Sciences and Social Work", FAC_COMPUTING, 12),
 }
 HEAD_NAMES = {
-    "CIT": "Dr. John Mushi", "BUS": "Dr. Amina Hassan", "SOC": "Dr. James Msuya",
-    "PAD": "Dr. Emmanuel Nyerere", "MAT": "Dr. David Kweka", "CLM": "Dr. Joseph Mwakyusa",
-    "PHS": "Dr. Irene Charles", "MLS": "Dr. Lucy Magesa", "NUR": "Dr. Beatrice John",
-    "ANA": "Dr. Happy Mboya", "PHY": "Dr. Victor Mwita", "PAT": "Dr. Lucy Magesa",
-    "COM": "Dr. Beatrice John", "SUR": "Dr. Daniel Komba", "PED": "Dr. Anna Mushi",
-    "LAW": "Dr. Sophia Mollel", "ARE": "Ms. Rose Kileo", "SCE": "Dr. Victor Mushi",
+    "CIT": "Dr. John Mushi", "BUS": "Dr. Amina Hassan",
+    "PAD": "Dr. Emmanuel Nyerere", "SOC": "Dr. James Msuya",
 }
 
 # ── Programmes: dept_code -> [(name, code, level, years)] ─────────────────────
@@ -87,57 +68,24 @@ PROGRAMS = {
         ("Bachelor of Commerce (Accounting)", "BAC", "Bachelor", 3),
         ("Diploma in Business Administration", "DBA", "Diploma", 2),
     ],
-    "SOC": [
-        ("Bachelor of Social Work", "BSW", "Bachelor", 3),
-        ("Bachelor of Arts in Sociology", "SOC", "Bachelor", 3),
-        ("Diploma in Social Work", "DSW", "Diploma", 2),
-    ],
     "PAD": [
         ("Bachelor of Public Administration", "BPA", "Bachelor", 3),
         ("Diploma in Public Administration", "DPA", "Diploma", 2),
     ],
-    "MAT": [
-        ("Bachelor of Science in Mathematics and Statistics", "BSM", "Bachelor", 3),
-    ],
-    "CLM": [
-        ("Bachelor of Medicine and Bachelor of Surgery", "MBBS", "Bachelor", 5),
-        ("Diploma in Clinical Medicine", "DCM", "Diploma", 3),
-    ],
-    "PHS": [
-        ("Bachelor of Pharmacy", "BPH", "Bachelor", 4),
-        ("Diploma in Pharmacy", "DPH", "Diploma", 2),
-    ],
-    "MLS": [
-        ("Bachelor of Science in Medical Laboratory Sciences", "BML", "Bachelor", 3),
-    ],
-    "NUR": [
-        ("Bachelor of Science in Nursing", "BSN", "Bachelor", 3),
-        ("Diploma in Nursing", "DNS", "Diploma", 2),
-    ],
-    "LAW": [
-        ("Bachelor of Laws", "LLB", "Bachelor", 3),
-        ("Diploma in Law", "DLW", "Diploma", 2),
-    ],
-    "ARE": [
-        ("Bachelor of Arts with Education", "BAE", "Bachelor", 3),
-    ],
-    "SCE": [
-        ("Bachelor of Science with Education", "BSE", "Bachelor", 3),
+    "SOC": [
+        ("Bachelor of Social Work", "BSW", "Bachelor", 3),
+        ("Bachelor of Arts in Sociology", "BSS", "Bachelor", 3),
+        ("Diploma in Social Work", "DSW", "Diploma", 2),
     ],
 }
 
 # ── Buildings: code -> name ─────────────────────────────────────────────────
 BUILDINGS = {
     "ICT":  "ICT Building",
-    "SCI":  "Science Complex",
     "BUS":  "Business & Management Block",
-    "LAW":  "Law Block",
-    "MED":  "Medical School Block",
-    "PHM":  "Pharmacy Building",
-    "NUR":  "Nursing Building",
-    "EDU":  "Education Block",
-    "ADM":  "Main Administration & Hall Block",
+    "PAD":  "Public Administration Block",
     "SOC":  "Social Sciences Block",
+    "ADM":  "Main Administration & Hall Block",
     "LIB":  "Library & Seminar Complex",
 }
 
@@ -145,40 +93,25 @@ BUILDINGS = {
 ROOM_TEMPLATES = {
     "ICT": [
         ("ICT Lab 1", "lab", 40, True), ("ICT Lab 2", "lab", 40, True),
-        ("ICT Lab 3", "lab", 35, True),
+        ("ICT Lab 3", "lab", 35, True), ("ICT Lab 4", "lab", 35, True),
         ("ICT Lecture Hall 1", "lecture", 100, False), ("ICT Lecture Hall 2", "lecture", 80, False),
-    ],
-    "SCI": [
-        ("Science Lab 1", "science_lab", 45, True), ("Science Lab 2", "science_lab", 45, True),
-        ("Physics Lab", "science_lab", 40, True), ("Science Lecture Hall", "lecture", 90, False),
+        ("ICT Lecture Hall 3", "lecture", 70, False),
     ],
     "BUS": [
         ("Business Lecture Hall 1", "lecture", 120, False), ("Business Lecture Hall 2", "lecture", 100, False),
+        ("Business Lecture Hall 3", "lecture", 90, False),
         ("Seminar Room B1", "seminar", 30, False), ("Seminar Room B2", "seminar", 25, False),
     ],
-    "LAW": [
-        ("Law Lecture Hall", "lecture", 90, False), ("Moot Court Room", "seminar", 40, False),
-        ("Law Seminar Room", "seminar", 25, False),
+    "PAD": [
+        ("Public Admin Lecture Hall 1", "lecture", 100, False), ("Public Admin Lecture Hall 2", "lecture", 80, False),
+        ("Public Admin Seminar Room", "seminar", 30, False),
     ],
-    "MED": [
-        ("Anatomy Lecture Theatre", "lecture", 150, False), ("Physiology Lab", "science_lab", 50, True),
-        ("Pathology Lab", "science_lab", 40, True), ("Medical Lecture Hall 1", "lecture", 120, False),
-        ("Medical Lecture Hall 2", "lecture", 100, False), ("Clinical Skills Lab", "science_lab", 35, True),
-    ],
-    "PHM": [
-        ("Pharmacy Lab", "science_lab", 40, True), ("Pharmacy Lecture Hall", "lecture", 80, False),
-    ],
-    "NUR": [
-        ("Nursing Skills Lab", "science_lab", 35, True), ("Nursing Lecture Hall", "lecture", 90, False),
-    ],
-    "EDU": [
-        ("Education Lecture Hall", "lecture", 100, False), ("Education Seminar Room", "seminar", 30, False),
+    "SOC": [
+        ("Social Sciences Lecture Hall 1", "lecture", 100, False), ("Social Sciences Lecture Hall 2", "lecture", 80, False),
+        ("Social Sciences Seminar Room", "seminar", 30, False), ("Fieldwork Practicum Room", "seminar", 25, False),
     ],
     "ADM": [
         ("Main Hall", "main_hall", 500, False), ("University Auditorium", "auditorium", 300, False),
-    ],
-    "SOC": [
-        ("Social Sciences Lecture Hall", "lecture", 100, False), ("Social Sciences Seminar Room", "seminar", 30, False),
     ],
     "LIB": [
         ("Seminar Room L1", "seminar", 25, False), ("Seminar Room L2", "seminar", 25, False),
@@ -204,25 +137,14 @@ TITLES = ["Dr.", "Dr.", "Dr.", "Prof.", "Mr.", "Ms."]
 
 SPECIALIZATIONS = {
     "CIT": ["Software Engineering", "Database Systems", "Computer Networks", "Artificial Intelligence",
-            "Information Security", "Web Technologies", "Data Science", "Systems Analysis"],
+            "Information Security", "Web Technologies", "Data Science", "Systems Analysis",
+            "Mobile Development", "Cloud Computing"],
     "BUS": ["Marketing Management", "Financial Management", "Strategic Management", "Entrepreneurship",
-            "Human Resource Management", "Accounting"],
-    "SOC": ["Social Work Practice", "Sociology", "Community Development", "Social Policy"],
-    "PAD": ["Public Policy", "Governance", "Local Government Administration"],
-    "MAT": ["Applied Mathematics", "Statistics", "Numerical Analysis"],
-    "CLM": ["Internal Medicine", "General Practice", "Clinical Diagnostics"],
-    "PHS": ["Pharmacology", "Pharmaceutics", "Medicinal Chemistry"],
-    "MLS": ["Microbiology", "Hematology", "Clinical Chemistry"],
-    "NUR": ["Clinical Nursing", "Community Health Nursing", "Midwifery"],
-    "ANA": ["Gross Anatomy", "Histology", "Neuroanatomy"],
-    "PHY": ["Human Physiology", "Cell Physiology"],
-    "PAT": ["Anatomic Pathology", "Clinical Pathology"],
-    "COM": ["Epidemiology", "Public Health"],
-    "SUR": ["General Surgery", "Orthopedic Surgery"],
-    "PED": ["Pediatrics", "Obstetrics & Gynaecology"],
-    "LAW": ["Constitutional Law", "Commercial Law", "Criminal Law", "Human Rights Law"],
-    "ARE": ["Curriculum Studies", "Educational Psychology"],
-    "SCE": ["Science Education", "Mathematics Education"],
+            "Human Resource Management", "Accounting", "Procurement", "International Business"],
+    "PAD": ["Public Policy", "Governance", "Local Government Administration", "Development Administration",
+            "Public Sector Management"],
+    "SOC": ["Social Work Practice", "Sociology", "Community Development", "Social Policy",
+            "Criminology", "Gender Studies"],
 }
 
 # ── Course pools: dept_code -> [(name, room_hint, weekly_hours)] ──────────────
@@ -254,92 +176,31 @@ COURSE_POOLS = {
         ("International Business", None, 3), ("Investment Analysis", None, 3),
         ("Project", "seminar", 4),
     ],
-    "SOC": [
-        ("Introduction to Sociology", None, 3), ("Social Work Practice", "seminar", 3),
-        ("Human Behaviour and the Social Environment", None, 3), ("Community Development", None, 3),
-        ("Social Policy", None, 3), ("Social Research Methods", "seminar", 3),
-        ("Gender Studies", None, 2), ("Social Welfare Administration", None, 3),
-        ("Counselling Skills", "seminar", 3), ("Fieldwork Practicum", "seminar", 4),
-        ("Population Studies", None, 2), ("Project", "seminar", 4),
-    ],
     "PAD": [
         ("Introduction to Public Administration", None, 3), ("Political Science", None, 3),
         ("Economics", None, 3), ("Public Finance", None, 3),
         ("Human Resource Management", None, 3), ("Local Government Administration", None, 3),
         ("Policy Analysis", "seminar", 3), ("Research Methods", None, 2),
         ("Public Policy", None, 3), ("Strategic Planning", None, 3),
-        ("Governance and Ethics", None, 2), ("Project", "seminar", 4),
+        ("Governance and Ethics", None, 2), ("Organizational Behaviour", None, 3),
+        ("Development Administration", None, 3), ("Public Sector Management", None, 3),
+        ("Comparative Public Administration", None, 3), ("Administrative Law", None, 3),
+        ("Project Planning and Management", "seminar", 3), ("Leadership and Management", None, 3),
+        ("Monitoring and Evaluation", "seminar", 3), ("Communication Skills", None, 2),
+        ("Project", "seminar", 4),
     ],
-    "MAT": [
-        ("Calculus I", None, 4), ("Linear Algebra", None, 3), ("Discrete Mathematics", None, 3),
-        ("Probability Theory", None, 3), ("Calculus II", None, 4), ("Statistical Methods", None, 3),
-        ("Numerical Analysis", None, 3), ("Operations Research", None, 3),
-        ("Applied Statistics", None, 3), ("Mathematical Modelling", None, 3),
-        ("Research Methods", None, 2), ("Project", "seminar", 4),
-    ],
-    "CLM": [
-        ("Human Anatomy I", "science_lab", 4), ("Human Physiology I", "science_lab", 4),
-        ("Biochemistry I", "science_lab", 3), ("Medical Ethics", None, 2),
-        ("Communication Skills", None, 2), ("Human Anatomy II", "science_lab", 4),
-        ("Human Physiology II", "science_lab", 4), ("Biochemistry II", "science_lab", 3),
-        ("Community Health", None, 3), ("Pathology", "science_lab", 4),
-        ("Pharmacology", "science_lab", 4), ("Microbiology", "science_lab", 4),
-        ("Internal Medicine", "science_lab", 5), ("Surgery", "science_lab", 5),
-        ("Pediatrics", "science_lab", 4), ("Obstetrics & Gynaecology", "science_lab", 4),
-        ("Psychiatry", None, 3), ("Community Medicine", None, 3),
-        ("Clinical Rotations", "science_lab", 6), ("Research Project", "seminar", 4),
-    ],
-    "PHS": [
-        ("Human Anatomy", "science_lab", 3), ("Organic Chemistry", "science_lab", 3),
-        ("Biochemistry", "science_lab", 3), ("Medical Terminology", None, 2),
-        ("Pharmacology", "science_lab", 4), ("Pharmaceutics", "science_lab", 4),
-        ("Medicinal Chemistry", "science_lab", 3), ("Microbiology", "science_lab", 3),
-        ("Clinical Pharmacy", "science_lab", 4), ("Pharmacokinetics", None, 3),
-        ("Toxicology", None, 3), ("Hospital Pharmacy", "science_lab", 3),
-        ("Community Pharmacy", None, 3), ("Industrial Pharmacy", "science_lab", 3),
-        ("Research Methods", None, 2), ("Project", "seminar", 4),
-    ],
-    "MLS": [
-        ("Human Anatomy and Physiology", "science_lab", 3), ("General Chemistry", "science_lab", 3),
-        ("Medical Microbiology", "science_lab", 4), ("Hematology", "science_lab", 4),
-        ("Clinical Chemistry", "science_lab", 4), ("Immunology", "science_lab", 3),
-        ("Histopathology", "science_lab", 3), ("Parasitology", "science_lab", 3),
-        ("Blood Transfusion Science", "science_lab", 3), ("Quality Control in the Lab", None, 2),
-        ("Research Methods", None, 2), ("Project", "seminar", 4),
-    ],
-    "NUR": [
-        ("Fundamentals of Nursing", "science_lab", 4), ("Human Anatomy and Physiology", "science_lab", 3),
-        ("Medical-Surgical Nursing I", "science_lab", 4), ("Community Health Nursing", None, 3),
-        ("Pharmacology for Nurses", None, 3), ("Medical-Surgical Nursing II", "science_lab", 4),
-        ("Midwifery", "science_lab", 4), ("Mental Health Nursing", None, 3),
-        ("Pediatric Nursing", "science_lab", 3), ("Research Methods", None, 2),
-        ("Clinical Practicum", "science_lab", 5), ("Project", "seminar", 4),
-    ],
-    "LAW": [
-        ("Legal Methods", None, 3), ("Constitutional Law", None, 3),
-        ("Criminal Law", None, 3), ("Legal Writing", "seminar", 2),
-        ("Contract Law", None, 3), ("Land Law", None, 3),
-        ("Administrative Law", None, 3), ("Family Law", None, 3),
-        ("Research Methods", None, 2), ("Commercial Law", None, 3),
-        ("Labour Law", None, 3), ("International Law", None, 3),
-        ("Moot Court", "seminar", 3), ("Human Rights Law", None, 3),
-        ("Dissertation", "seminar", 4),
-    ],
-    "ARE": [
-        ("Educational Psychology", None, 3), ("Curriculum Studies", None, 3),
-        ("Introduction to Literature", None, 3), ("History of East Africa", None, 3),
-        ("Teaching Methods", "seminar", 3), ("Geography", None, 3),
-        ("Educational Assessment", None, 2), ("Guidance and Counselling", "seminar", 2),
-        ("Kiswahili Studies", None, 3), ("Research Methods", None, 2),
-        ("Teaching Practice", "seminar", 4), ("Project", "seminar", 4),
-    ],
-    "SCE": [
-        ("Educational Psychology", None, 3), ("Curriculum Studies", None, 3),
-        ("General Physics", "science_lab", 3), ("General Chemistry", "science_lab", 3),
-        ("Teaching Methods", "seminar", 3), ("General Biology", "science_lab", 3),
-        ("Educational Assessment", None, 2), ("Guidance and Counselling", "seminar", 2),
-        ("Mathematics for Educators", None, 3), ("Research Methods", None, 2),
-        ("Teaching Practice", "seminar", 4), ("Project", "seminar", 4),
+    "SOC": [
+        ("Introduction to Sociology", None, 3), ("Social Work Practice", "seminar", 3),
+        ("Human Behaviour and the Social Environment", None, 3), ("Community Development", None, 3),
+        ("Social Policy", None, 3), ("Social Research Methods", "seminar", 3),
+        ("Gender Studies", None, 2), ("Social Welfare Administration", None, 3),
+        ("Counselling Skills", "seminar", 3), ("Fieldwork Practicum", "seminar", 4),
+        ("Population Studies", None, 2), ("Social Problems and Social Change", None, 3),
+        ("Criminology", None, 3), ("Family and Child Welfare", None, 3),
+        ("Social Work with Groups", "seminar", 3), ("Human Rights and Social Justice", None, 2),
+        ("Community Organizing", "seminar", 3), ("Social Statistics", None, 3),
+        ("Social Psychology", None, 3), ("Communication Skills", None, 2),
+        ("Project", "seminar", 4),
     ],
 }
 
@@ -347,13 +208,13 @@ COURSE_POOLS = {
 # that constraint end-to-end. (dept_code, course-name-substring, room-name)
 FIXED_ROOM_PICKS = [
     ("CIT", "Programming Fundamentals", "ICT Lab 1"),
-    ("PHS", "Pharmaceutics", "Pharmacy Lab"),
-    ("MLS", "Hematology", "Science Lab 1"),
-    ("LAW", "Moot Court", "Moot Court Room"),
-    ("NUR", "Fundamentals of Nursing", "Nursing Skills Lab"),
+    ("CIT", "Data Structures and Algorithms", "ICT Lab 2"),
+    ("BUS", "Strategic Management", "Seminar Room B1"),
+    ("PAD", "Policy Analysis", "Public Admin Seminar Room"),
+    ("SOC", "Fieldwork Practicum", "Fieldwork Practicum Room"),
 ]
 
-COURSES_PER_SEMESTER = 3  # bachelors/diplomas; MBBS gets more, below
+COURSES_PER_SEMESTER = 6  # every student group gets 6 courses/semester (>5, per requirement)
 
 
 def make_lecturer_name(used_names):
@@ -449,7 +310,7 @@ def seed():
         print("Creating programmes and student groups…")
         prog_objs = {}
         group_count = 0
-        BIG_FIRST_YEAR = {"BCS", "MBBS", "BBA"}  # split into Group A/B in year 1
+        BIG_FIRST_YEAR = {"BCS", "BBA", "BPA", "BSW"}  # one flagship program per dept, split A/B in year 1
         for dept_code, programs in PROGRAMS.items():
             dept = dept_objs[dept_code]
             for name, code, level, years in programs:
@@ -460,18 +321,22 @@ def seed():
                 prog_objs[code] = prog
 
                 for year in range(1, years + 1):
-                    for semester in (1, 2):
-                        letters = ("A", "B") if (code in BIG_FIRST_YEAR and year == 1) else ("A",)
-                        for letter in letters:
-                            gcode = f"{code}-Y{year}S{semester}{letter}"
-                            _, was_created = get_or_create(
-                                StudentGroup, {"code": gcode, "program_id": prog.id},
-                                name=f"{code} Year {year} Sem {semester} Group {letter}",
-                                year_of_study=year, semester=semester,
-                                student_count=random.randint(25, 45), is_active=True,
-                            )
-                            if was_created:
-                                group_count += 1
+                    # One cohort per year (same students all year, just different
+                    # courses per semester) — split years get a Group A/B suffix,
+                    # everyone else has a plain "{code} Year {year}" name.
+                    letters = ("A", "B") if (code in BIG_FIRST_YEAR and year == 1) else ("A",)
+                    for letter in letters:
+                        split = len(letters) > 1
+                        gcode = f"{code}-Y{year}{letter}" if split else f"{code}-Y{year}"
+                        gname = f"{code} Year {year}" + (f" Group {letter}" if split else "")
+                        _, was_created = get_or_create(
+                            StudentGroup, {"code": gcode, "program_id": prog.id},
+                            name=gname,
+                            year_of_study=year, semester=1,
+                            student_count=random.randint(25, 45), is_active=True,
+                        )
+                        if was_created:
+                            group_count += 1
         db.session.flush()
         print(f"  {len(prog_objs)} programmes, {group_count} student groups.")
 
@@ -484,11 +349,11 @@ def seed():
             for _, prog_code, _, years in programs:
                 prog = prog_objs[prog_code]
                 idx = 0
-                per_sem = 4 if prog_code == "MBBS" else COURSES_PER_SEMESTER
+                per_sem = COURSES_PER_SEMESTER
                 for year in range(1, years + 1):
                     for semester in (1, 2):
                         groups = StudentGroup.query.filter_by(
-                            program_id=prog.id, year_of_study=year, semester=semester
+                            program_id=prog.id, year_of_study=year
                         ).all()
                         for _ in range(per_sem):
                             name, hint, wh = pool[idx % len(pool)]

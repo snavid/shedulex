@@ -33,13 +33,26 @@ const roomsOfType = computed(() =>
   rooms.value.filter((r) => r.room_type === form.value.required_room_type)
 )
 
-// Groups filtered to match the selected semester + year (convenience filter)
+// Groups scoped to the form's selected department — used as the fallback pool
+// when no semester/year match, so cross-department groups never leak into the picker.
+const deptScopedGroups = computed(() => {
+  if (!form.value.department_id) return studentGroups.value
+  return studentGroups.value.filter(g => g.program?.department_id === form.value.department_id)
+})
+
+// Further narrowed to match the selected semester + year (convenience filter)
 const relevantGroups = computed(() => {
-  if (!form.value.semester && !form.value.year_of_study) return studentGroups.value
-  return studentGroups.value.filter(g =>
+  if (!form.value.semester && !form.value.year_of_study) return deptScopedGroups.value
+  return deptScopedGroups.value.filter(g =>
     (!form.value.semester       || g.semester        === form.value.semester) &&
     (!form.value.year_of_study  || g.year_of_study   === form.value.year_of_study)
   )
+})
+
+// Student groups scoped to the toolbar department filter — drives the "By Group" board.
+const filteredGroups = computed(() => {
+  if (!deptFilter.value) return studentGroups.value
+  return studentGroups.value.filter(g => g.program?.department_id === deptFilter.value)
 })
 
 // "list" | "byGroup"
@@ -54,9 +67,10 @@ const filtered = computed(() => {
 })
 
 // Group view: each student group → its courses; plus an "unassigned" bucket
+// Respects the department filter — buckets only show groups (and courses) in scope.
 const groupedView = computed(() => {
   const buckets = []
-  for (const group of studentGroups.value) {
+  for (const group of filteredGroups.value) {
     const groupCourses = filtered.value.filter(c =>
       (c.student_group_ids || []).includes(group.id)
     )
@@ -398,10 +412,10 @@ onMounted(loadData)
             </button>
           </template>
 
-          <!-- Show all if no relevant groups -->
+          <!-- Show all department groups if no semester/year match -->
           <template v-else>
             <button
-              v-for="g in studentGroups"
+              v-for="g in deptScopedGroups"
               :key="g.id"
               type="button"
               @click="toggleGroup(g.id)"
@@ -568,8 +582,8 @@ onMounted(loadData)
       <div class="space-y-4">
         <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide">Student Groups</h2>
 
-        <div v-if="!studentGroups.length" class="card text-center py-10 text-gray-400">
-          No student groups added yet.
+        <div v-if="!filteredGroups.length" class="card text-center py-10 text-gray-400">
+          {{ deptFilter ? "No student groups in this department." : "No student groups added yet." }}
         </div>
 
         <div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">

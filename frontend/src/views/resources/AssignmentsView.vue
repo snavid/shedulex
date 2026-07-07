@@ -21,11 +21,13 @@ const auth      = useAuthStore()
 const yearStore = useAcademicYearStore()
 const toast     = useToast()
 
-const loading   = ref(true)
-const saving    = ref(null)      // task.key currently being saved
-const lecturers = ref([])
-const courses   = ref([])
-const search    = ref("")
+const loading     = ref(true)
+const saving      = ref(null)      // task.key currently being saved
+const lecturers   = ref([])
+const courses     = ref([])
+const departments = ref([])
+const search      = ref("")
+const deptFilter  = ref("")
 
 // Course IDs the user has manually expanded into per-group chips.
 // Cleared when the semester changes.
@@ -39,16 +41,32 @@ const canManage = computed(() =>
 async function loadData(silent = false) {
   if (!silent) loading.value = true
   try {
-    const [lecRes, crsRes] = await Promise.all([
+    const [lecRes, crsRes, deptRes] = await Promise.all([
       resourcesApi.lecturers(),
       resourcesApi.courses({ semester: yearStore.currentSemester }),
+      resourcesApi.departments(),
     ])
-    lecturers.value = lecRes.data.data || []
-    courses.value   = crsRes.data.data || []
+    lecturers.value   = lecRes.data.data || []
+    courses.value     = crsRes.data.data || []
+    departments.value = deptRes.data.data || []
   } finally {
     if (!silent) loading.value = false
   }
 }
+
+// Department filter scopes both sides of the board: which lecturer cards
+// appear, and which courses/tasks are eligible to appear on either side.
+const filteredLecturers = computed(() =>
+  deptFilter.value
+    ? lecturers.value.filter(l => (l.department_id || l.department?.id) === deptFilter.value)
+    : lecturers.value
+)
+
+const filteredCourses = computed(() =>
+  deptFilter.value
+    ? courses.value.filter(c => c.department_id === deptFilter.value)
+    : courses.value
+)
 
 watch(() => yearStore.currentSemester, () => {
   splitCourses.value = new Set()
@@ -184,7 +202,7 @@ function matchQ(course, group, q) {
 }
 
 const tasks = computed(() =>
-  buildTasks(courses.value, search.value.toLowerCase(), splitCourses.value)
+  buildTasks(filteredCourses.value, search.value.toLowerCase(), splitCourses.value)
 )
 
 function lecturerTasks(lecturerId) {
@@ -293,7 +311,13 @@ onMounted(loadData)
           Multi-group courses appear as one chip; click <strong>Split</strong> to assign groups to different lecturers.
         </p>
       </div>
-      <input v-model="search" class="input max-w-xs" placeholder="Search courses or groups…" />
+      <div class="flex flex-wrap gap-3">
+        <select v-model="deptFilter" class="input w-auto">
+          <option value="">All departments</option>
+          <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
+        </select>
+        <input v-model="search" class="input max-w-xs" placeholder="Search courses or groups…" />
+      </div>
     </div>
 
     <!-- Legend -->
@@ -331,13 +355,13 @@ onMounted(loadData)
       <div class="space-y-4">
         <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide">Lecturers</h2>
 
-        <div v-if="!lecturers.length" class="card text-center py-10 text-gray-400">
-          No lecturers added yet.
+        <div v-if="!filteredLecturers.length" class="card text-center py-10 text-gray-400">
+          {{ deptFilter ? "No lecturers in this department." : "No lecturers added yet." }}
         </div>
 
         <div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
           <div
-            v-for="lec in lecturers"
+            v-for="lec in filteredLecturers"
             :key="lec.id"
             class="card border-2 transition-all duration-150 min-h-[140px] flex flex-col"
             :class="dragOver === lec.id

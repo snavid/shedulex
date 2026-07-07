@@ -16,7 +16,7 @@ const search = ref("")
 
 const blank = () => ({
   name: "", code: "", program_id: "",
-  year_of_study: 1, semester: 1, student_count: 30,
+  year_of_study: 1, student_count: 30,
 })
 const form = ref(blank())
 
@@ -52,7 +52,7 @@ function openEdit(g) {
   editTarget.value = g
   form.value = {
     name: g.name, code: g.code, program_id: g.program_id,
-    year_of_study: g.year_of_study, semester: g.semester, student_count: g.student_count,
+    year_of_study: g.year_of_study, student_count: g.student_count,
   }
   showForm.value = true
   deleteTarget.value = null
@@ -150,14 +150,6 @@ onMounted(load)
           <label class="label">Year of Study</label>
           <input v-model.number="form.year_of_study" type="number" min="1" max="6" class="input" />
         </div>
-        <div>
-          <label class="label">Semester</label>
-          <select v-model.number="form.semester" class="input">
-            <option :value="1">Semester 1</option>
-            <option :value="2">Semester 2</option>
-            <option :value="3">Semester 3 (Trimester)</option>
-          </select>
-        </div>
       </div>
       <div class="flex gap-2">
         <button class="btn-primary" :disabled="saving" @click="save">
@@ -238,7 +230,6 @@ onMounted(load)
             <span>{{ g.program?.name || programs.find(p => p.id === g.program_id)?.name || "—" }}</span>
             <span>·</span>
             <span class="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-medium">Yr {{ g.year_of_study }}</span>
-            <span class="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded font-medium">Sem {{ g.semester }}</span>
             <span>· {{ g.student_count }} students</span>
           </div>
         </div>

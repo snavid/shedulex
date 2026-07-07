@@ -144,14 +144,18 @@ async function resend(userId, lecturerName) {
 
 const deleteTarget = ref(null)
 const search = ref("")
+const deptFilter = ref("")
 
 const filtered = computed(() => {
+  let list = lecturers.value
+  if (deptFilter.value) list = list.filter((l) => (l.department_id || l.department?.id) === deptFilter.value)
   const q = search.value.toLowerCase()
-  return q
-    ? lecturers.value.filter(
-        (l) => l.name.toLowerCase().includes(q) || l.email.toLowerCase().includes(q) || (l.staff_id || "").toLowerCase().includes(q),
-      )
-    : lecturers.value
+  if (q) {
+    list = list.filter(
+      (l) => l.name.toLowerCase().includes(q) || l.email.toLowerCase().includes(q) || (l.staff_id || "").toLowerCase().includes(q),
+    )
+  }
+  return list
 })
 
 async function confirmDeactivate() {
@@ -303,9 +307,13 @@ onMounted(loadData)
       </div>
     </div>
 
-    <!-- Search -->
-    <div>
+    <!-- Filters -->
+    <div class="flex flex-wrap gap-3">
       <input v-model="search" class="input max-w-sm" placeholder="Search by name, email or staff ID…" />
+      <select v-model="deptFilter" class="input w-auto">
+        <option value="">All departments</option>
+        <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
+      </select>
     </div>
 
     <!-- List -->
@@ -339,8 +347,8 @@ onMounted(loadData)
       </div>
 
       <div v-else-if="!filtered.length" class="text-center py-8 text-sm text-gray-500">
-        No lecturers match "<strong>{{ search }}</strong>".
-        <button class="text-blue-600 hover:underline ml-1" @click="search = ''">Clear</button>
+        No lecturers match your filters.
+        <button class="text-blue-600 hover:underline ml-1" @click="search = ''; deptFilter = ''">Clear</button>
       </div>
 
       <div v-else class="divide-y divide-gray-100 -mx-6">
